@@ -84,6 +84,33 @@ export default LoginPage;
 ### 6.5 `frontend/src/pages/CompleteProfilePage.jsx` (nou)
 Formular: `nume`, `prenume`, `facultate`, `rolDorit`. La submit: `POST /api/auth/complete-profile`. Succes → redirect către `/asteptare-aprobare`.
 
+> [!IMPORTANT]
+> **Tratarea Erorilor de Validare (REST API):**
+> Dacă utilizatorul introduce date invalide sau trimite formularul gol, backend-ul va returna **HTTP 400 Bad Request** cu un obiect JSON ce conține erorile specifice fiecărui input.
+> 
+> React trebuie să citească obiectul `campuri` din răspuns (disponibil în `error.response.data.campuri`) și să afișeze mesajele de eroare sub fiecare câmp în parte.
+> 
+> *Exemplu de tratare a erorii în React:*
+> ```javascript
+> const [validationErrors, setValidationErrors] = useState({});
+> 
+> const handleSubmit = async (e) => {
+>   e.preventDefault();
+>   try {
+>     await axiosInstance.post('/api/auth/complete-profile', formData);
+>     navigate('/asteptare-aprobare');
+>   } catch (error) {
+>     if (error.response && error.response.status === 400 && error.response.data.campuri) {
+>       // Salvăm erorile pe câmpuri ca să le afișăm sub input-uri
+>       setValidationErrors(error.response.data.campuri);
+>     } else {
+>       alert("Eroare la salvare: " + (error.response?.data?.eroare || error.message));
+>     }
+>   }
+> };
+> ```
+> *(Pentru detalii complete despre formatul JSON al erorilor returnate de backend, vezi secțiunea **Contractul de Erori REST API (Exception Handling)** din `auth_backend_keycloak.md`)*
+
 ### 6.6 Pagini de stare (noi, simple)
 - `AsteptareAprobarePage.jsx` — mesaj "cererea ta e în curs de analiză"
 - `CerereRespinsaPage.jsx` — mesaj + buton "Editează și retrimite" → duce înapoi la `CompleteProfilePage` (pre-completată dacă vreți, opțional)

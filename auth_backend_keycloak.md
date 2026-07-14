@@ -38,7 +38,7 @@ Dă agentului **câte o Etapă odată**, nu tot fișierul. Verifică rezultatul 
 - Sesiuni in-memory (fără Redis, o singură instanță de backend)
 - CSRF activat (`CookieCsrfTokenRepository` + `CsrfCookieFilter` pentru deferred-token)
 - Proxy Vite în dev (elimină CORS/cross-origin complet, cod frontend cu URL-uri relative)
-- ⚠️ **Principiu KISS (decizie coordonator)**: Keycloak stochează **doar identitate minimă** — email + parolă, atât. NU stochează rol, NU stochează nume/prenume. DB (`APP_USER`) e singura sursă de adevăr pentru absolut tot ce ține de business — rol, nume, prenume, facultate, stare cont. Backend-ul nu citește niciodată `firstName`/`lastName`/rol din tokenul Keycloak; `CustomAuthoritiesMapper` (Etapa 2.1) construiește autoritățile exclusiv din `ID_ROL` din DB. Consecință directă: nu mai există niciun apel Keycloak legat de rol nicăieri în plan (nici creare roluri de realm, nici atribuire la accept) — vezi Etapa 5.
+- ⚠️ **Principiu KISS (decizie coordonator)**: Keycloak stochează **doar identitate minimă** — email + parolă, atât. NU stochează rol, NU stochează nume/prenume. DB (`APP_USER`) e singura sursă de adevăr pentru absolut tot ce ține de business — rol, nume, prenume, facultate, stare cont. Backend-ul nu citește niciodată `firstName`/`lastName` `/rol` din tokenul Keycloak; `CustomAuthoritiesMapper` (Etapa 2.1) construiește autoritățile exclusiv din `ID_ROL` din DB. Consecință directă: nu mai există niciun apel Keycloak legat de rol nicăieri în plan (nici creare roluri de realm, nici atribuire la accept) — vezi Etapa 5.
 
 ### Schema DB (actualizată pentru noul flux)
 
@@ -568,5 +568,56 @@ public class AdminController {
 ## Etapa 8 — 🤖 AGENT: Date demo pentru evaluare (opțional, profil separat)
 
 Similar cu runda anterioară, dar acum simulează stadiul realist pentru admin: `STARE_CONT = PENDING`, cu `NUME`/`PRENUME`/`FACULTATE`/`ID_ROL` deja completate (ca și cum ar fi trecut deja prin Complete-Profile), `ID_KEYCLOAK` = UUID-uri fictive generate random (nu userii chiar nu există în Keycloak — nu contează, fiindcă demo-ul testează doar panoul admin, nu login-ul acelor conturi). `@Profile("demo")`, dezactivat implicit.
+
+---
+
+## Contractul de Erori REST API (Exception Handling)
+
+Pentru a ajuta frontend-ul React să trateze corect erorile și să afișeze mesaje specifice (sau erori de validare pe input-uri), backend-ul folosește un sistem global de captare a excepțiilor (`GlobalExceptionHandler`). 
+
+Orice eroare aruncată în backend este tradusă într-un răspuns JSON unitar și un cod HTTP standard.
+
+### 1. Formatul standard pentru Erori Generale
+Pentru erorile de tip resursă negăsită, stare incompatibilă sau conflict, răspunsul are următoarea structură:
+
+* **Cod HTTP:** 404 (Not Found), 400 (Bad Request), 409 (Conflict), sau 502 (Bad Gateway)
+* **JSON:**
+```json
+{
+  "status": 404,
+  "eroare": "Mesajul explicativ al erorii, generat de backend."
+}
+```
+
+#### Maparea Excepțiilor pe coduri HTTP:
+* **`UserNotFoundException`** (HTTP 404 Not Found)
+  * *Exemplu:* `{"status": 404, "eroare": "Utilizatorul cu id=5 nu a fost găsit."}`
+* **`InvalidUserStateException`** (HTTP 400 Bad Request)
+  * *Exemplu:* `{"status": 400, "eroare": "Utilizatorul 5 nu are starea PENDING (starea curentă: ACTIV)"}`
+* **`KeycloakConflictException`** (HTTP 409 Conflict)
+  * *Exemplu:* `{"status": 409, "eroare": "Emailul 'popescu@student.test' există deja direct în Keycloak. Necesită curățare manuală..."}`
+* **`KeycloakIntegrationException`** (HTTP 502 Bad Gateway)
+  * *Exemplu:* `{"status": 502, "eroare": "Eroare de comunicare cu Keycloak. Verificați logurile și reîncercați.", "detalii": "Connection refused..."}`
+
+---
+
+### 2. Formatul special pentru Erori de Validare Formular (HTTP 400)
+Când frontend-ul trimite date de formular care nu respectă validările din Java (de exemplu, la completarea profilului sau înregistrări), eroarea va conține un obiect suplimentar numit `campuri` în care sunt detaliate erorile specifice fiecărui câmp:
+
+* **Cod HTTP:** 400 (Bad Request)
+* **JSON:**
+```json
+{
+  "status": 400,
+  "eroare": "Date invalide",
+  "campuri": {
+    "nume": "Numele este obligatoriu",
+    "prenume": "Prenumele nu poate fi gol",
+    "rolDorit": "Rolul ales trebuie să fie STUDENT sau PROFESOR"
+  }
+}
+```
+
+*Notă pentru React:* Acest obiect `campuri` poate fi citit direct în React (ex: `error.response.data.campuri`) și folosit pentru a afișa mesaje roșii de validare direct sub input-urile corespunzătoare din formular (de exemplu, în `CompleteProfilePage`).
 
 ---
