@@ -31,10 +31,10 @@ public class Curs extends BaseAuditableEntity {
     @Column(length = 1000)
     private String descriere;
 
-    @Column(name = "data_inceput", nullable = false)
+    @Column(name = "data_inceput")
     private LocalDate dataInceput;
 
-    @Column(name = "data_sfarsit", nullable = false)
+    @Column(name = "data_sfarsit")
     private LocalDate dataSfarsit;
 
     @Column(nullable = false)

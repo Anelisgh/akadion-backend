@@ -90,8 +90,8 @@ Cursurile create de profesori pe platformă.
 | `profesor` | `User` | `id_profesor` | `BIGINT` | `@ManyToOne`, `NOT NULL` (Relație cu `app_user`) |
 | `denumire` | `String` | `denumire` | `VARCHAR(150)` | `NOT NULL` |
 | `descriere` | `String` | `descriere` | `VARCHAR(1000)` | `NULLABLE` |
-| `dataInceput` | `LocalDate` | `data_inceput` | `DATE` | `NOT NULL` |
-| `dataSfarsit` | `LocalDate` | `data_sfarsit` | `DATE` | `NOT NULL` |
+| `dataInceput` | `LocalDate` | `data_inceput` | `DATE` | `NULLABLE` |
+| `dataSfarsit` | `LocalDate` | `data_sfarsit` | `DATE` | `NULLABLE` |
 | `activ` | `Boolean` | `activ` | `BOOLEAN` | `NOT NULL` (Implicit `true`) |
 
 #### Indecși:
