@@ -19,13 +19,14 @@ public class AdminController {
 
     private final AdminUserService adminUserService;
 
-    // 1. Listează cererile de înregistrare trimise de utilizatori care sunt în starea PENDING.
-    // Apel: GET /api/admin/users?stare=PENDING
+    // 1. Listează utilizatorii din sistem în funcție de starea lor.
+    // Apel implicit (doar cei în așteptare): GET /api/admin/users?stare=PENDING
+    // Apel pentru absolut toți utilizatorii: GET /api/admin/users?stare=ALL
+    // Apel pentru cei activi: GET /api/admin/users?stare=ACTIV
     @GetMapping("/users")
     public List<UserPendingDto> listaUseri(
             @RequestParam(defaultValue = "PENDING") String stare) {
-        // În acest plan listăm doar utilizatorii care așteaptă aprobarea (PENDING)
-        return adminUserService.listaCereriPending();
+        return adminUserService.listaUtilizatori(stare);
     }
 
     // 2. Aprobă un utilizator aflat în starea PENDING.

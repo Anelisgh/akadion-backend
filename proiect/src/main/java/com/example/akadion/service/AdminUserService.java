@@ -25,12 +25,19 @@ public class AdminUserService {
     private final StareContRepository stareContRepository;
     private final KeycloakAdminService keycloakAdminService; // Conexiunea cu Keycloak
 
-    // 1. Listează toate cererile de utilizatori care sunt în starea PENDING (așteaptă aprobare).
+    // 1. Listează utilizatorii din sistem.
+    // Dacă parametrul stare este "ALL", returnează absolut toți utilizatorii din DB.
+    // Altfel, filtrează utilizatorii după starea primită (ex: "ACTIV", "PENDING", "INACTIV", "RESPINS", "INCOMPLET").
     // @Transactional(readOnly = true) îi spune bazei de date că doar citim informații (ceea ce este mai rapid și sigur).
     @Transactional(readOnly = true)
-    public List<UserPendingDto> listaCereriPending() {
-        return userRepository.findByStareCont_Denumire("PENDING")
-                .stream()
+    public List<UserPendingDto> listaUtilizatori(String stare) {
+        List<User> list;
+        if ("ALL".equalsIgnoreCase(stare)) {
+            list = userRepository.findAll();
+        } else {
+            list = userRepository.findByStareCont_Denumire(stare.toUpperCase());
+        }
+        return list.stream()
                 // Transformăm fiecare utilizator din baza de date într-un obiect simplu de trimis (DTO)
                 .map(user -> new UserPendingDto(
                         user.getId(),
@@ -38,10 +45,12 @@ public class AdminUserService {
                         user.getPrenume(),
                         user.getMail(),
                         user.getFacultate(),
-                        // Dacă utilizatorul nu are rol (deși nu ar trebui în starea PENDING), punem null
+                        // Dacă utilizatorul nu are rol, punem null
                         user.getRol() != null ? user.getRol().getDenumire() : null,
                         // Citim numărul de respingeri anterioare (dacă este null, punem implicit 0)
-                        user.getNrRespingeri() != null ? user.getNrRespingeri() : 0
+                        user.getNrRespingeri() != null ? user.getNrRespingeri() : 0,
+                        // Adăugăm și starea curentă în DTO pentru ca React să știe în ce categorie se află utilizatorul
+                        user.getStareCont() != null ? user.getStareCont().getDenumire() : "INCOMPLET"
                 ))
                 .toList();
     }

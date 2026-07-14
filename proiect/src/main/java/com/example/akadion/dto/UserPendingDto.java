@@ -12,5 +12,6 @@ public record UserPendingDto(
         String mail,
         String facultate,
         String rolDorit,
-        long nrRespingeriAnterioare
+        long nrRespingeriAnterioare,
+        String stare
 ) {}

@@ -149,54 +149,146 @@ const LogoutButton = () => {
 
 ### 7.2 Panou Admin: Lista Cereri (`AdminPendingPage.jsx`)
 Actualizăm codul paginii pentru a folosi proprietatea directă `nrRespingeri` primită din DTO:
+
+> [!TIP]
+> **Filtrare și extragere utilizatori (Backend + Frontend):**
+> Endpoint-ul `/api/admin/users` suportă acum parametrul de query `stare` pentru a aduce exact datele de care ai nevoie:
+> * `GET /api/admin/users?stare=ALL` -> Returnează absolut TOȚI utilizatorii din bază.
+> * `GET /api/admin/users?stare=ACTIV` -> Doar utilizatorii activați.
+> * `GET /api/admin/users?stare=PENDING` -> Doar cei în așteptare de aprobare.
+> * `GET /api/admin/users?stare=INACTIV` -> Cei dezactivați.
+> * `GET /api/admin/users?stare=RESPINS` -> Cei refuzați.
+> 
+> Fiecare obiect de tip utilizator returnat de backend conține acum și câmpul `stare` (ex: `stare: "ACTIV"`). 
+> Căutările după nume, e-mail sau facultate se pot face foarte ușor direct în frontend, filtrând în timp real (in-memory) lista descărcată din backend!
+
+Exemplu de cod React pentru afișare și filtrare în funcție de starea selectată:
+
 ```javascript
 import React, { useEffect, useState } from 'react';
 import axiosInstance from '../api/axiosInstance';
 
 const AdminPendingPage = () => {
-  const [cereri, setCereri] = useState([]);
+  const [utilizatori, setUtilizatori] = useState([]);
+  const [filtruStare, setFiltruStare] = useState('PENDING'); // PENDING implicit, poate fi schimbat de admin la ALL, ACTIV, etc.
 
   useEffect(() => {
-    axiosInstance.get('/api/admin/users?stare=PENDING')
-      .then(res => setCereri(res.data))
+    // Apelăm API-ul trimițând starea selectată (PENDING, ACTIV, INACTIV, RESPINS, ALL)
+    axiosInstance.get(`/api/admin/users?stare=${filtruStare}`)
+      .then(res => setUtilizatori(res.data))
       .catch(err => console.error(err));
-  }, []);
+  }, [filtruStare]); // Se re-apelează când adminul schimbă filtrul din interfață
+
+
+  const [cautare, setCautare] = useState('');
 
   const handleAction = async (id, action) => {
     try {
       await axiosInstance.post(`/api/admin/users/${id}/${action}`);
-      setCereri(cereri.filter(user => user.id !== id));
+      // După acțiune, reîncărcăm lista ca să avem stările actualizate din DB
+      const res = await axiosInstance.get(`/api/admin/users?stare=${filtruStare}`);
+      setUtilizatori(res.data);
     } catch (err) {
-      alert('Eroare la procesarea cererii: ' + err.message);
+      alert('Eroare la procesarea acțiunii: ' + err.message);
     }
   };
 
+  // Filtrare suplimentară în frontend (in-memory) după Nume/Prenume/Email/Facultate
+  const utilizatoriFiltrati = utilizatori.filter(user => {
+    const textCautat = cautare.toLowerCase();
+    return (
+      user.nume?.toLowerCase().includes(textCautat) ||
+      user.prenume?.toLowerCase().includes(textCautat) ||
+      user.mail?.toLowerCase().includes(textCautat) ||
+      user.facultate?.toLowerCase().includes(textCautat)
+    );
+  });
+
   return (
-    <div>
-      <h2>Cereri Înregistrare în Așteptare</h2>
-      <table>
+    <div style={{ padding: '20px' }}>
+      <h2>Administrare Utilizatori</h2>
+
+      {/* Controlere de Filtrare și Căutare */}
+      <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+        <div>
+          <label>Filtrează după Stare: </label>
+          <select value={filtruStare} onChange={e => setFiltruStare(e.target.value)}>
+            <option value="ALL">Toți utilizatorii</option>
+            <option value="PENDING">În așteptare (Pending)</option>
+            <option value="ACTIV">Activi</option>
+            <option value="INACTIV">Dezactivați (Inactivi)</option>
+            <option value="RESPINS">Respinși</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Caută după Nume/Email: </label>
+          <input 
+            type="text" 
+            placeholder="Introduceți text..." 
+            value={cautare} 
+            onChange={e => setCautare(e.target.value)} 
+          />
+        </div>
+      </div>
+
+      {/* Tabel Date */}
+      <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
-          <tr>
-            <th>Nume</th>
+          <tr style={{ backgroundColor: '#f2f2f2' }}>
+            <th>Nume Complet</th>
             <th>Email</th>
-            <th>Rol Dorit</th>
-            <th>Nr. Respingeri anterioare</th>
+            <th>Facultate</th>
+            <th>Rol</th>
+            <th>Stare Cont</th>
+            <th>Respingeri anterioare</th>
             <th>Acțiuni</th>
           </tr>
         </thead>
         <tbody>
-          {cereri.map(user => (
+          {utilizatoriFiltrati.map(user => (
             <tr key={user.id}>
               <td>{user.prenume} {user.nume}</td>
               <td>{user.mail}</td>
-              <td>{user.rolDorit || user.rol}</td>
-              <td>{user.nrRespingeri}</td>
+              <td>{user.facultate || '-'}</td>
+              <td>{user.rolDorit || '-'}</td>
               <td>
-                <button onClick={() => handleAction(user.id, 'accept')}>Acceptă</button>
-                <button onClick={() => handleAction(user.id, 'reject')}>Respinge</button>
+                <span style={{ 
+                  fontWeight: 'bold', 
+                  color: user.stare === 'ACTIV' ? 'green' : user.stare === 'PENDING' ? 'orange' : 'red' 
+                }}>
+                  {user.stare}
+                </span>
+              </td>
+              <td>{user.nrRespingeriAnterioare}</td>
+              <td>
+                {/* Afișăm butoane diferite în funcție de starea utilizatorului curent */}
+                {user.stare === 'PENDING' && (
+                  <>
+                    <button onClick={() => handleAction(user.id, 'accept')} style={{ marginRight: '5px' }}>Acceptă</button>
+                    <button onClick={() => handleAction(user.id, 'reject')} style={{ backgroundColor: '#ffcccc' }}>Respinge</button>
+                  </>
+                )}
+                {user.stare === 'ACTIV' && (
+                  <button onClick={() => handleAction(user.id, 'deactivate')} style={{ backgroundColor: '#ff9999' }}>Dezactivează</button>
+                )}
+                {user.stare === 'INACTIV' && (
+                  <button onClick={() => handleAction(user.id, 'activate')} style={{ backgroundColor: '#ccffcc' }}>Activează la loc</button>
+                )}
+                {user.stare === 'RESPINS' && (
+                  <span style={{ fontSize: '12px', color: 'gray' }}>Așteaptă corectarea datelor</span>
+                )}
+                {user.stare === 'INCOMPLET' && (
+                  <span style={{ fontSize: '12px', color: 'gray' }}>Profil necompletat încă</span>
+                )}
               </td>
             </tr>
           ))}
+          {utilizatoriFiltrati.length === 0 && (
+            <tr>
+              <td colSpan="7" style={{ textAlign: 'center' }}>Nu s-au găsit utilizatori.</td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

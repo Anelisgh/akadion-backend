@@ -515,7 +515,7 @@ public class KeycloakAdminService {
 ```
 
 ### 5.2 `AdminUserService.java`
-- `listaCereriPending()`: `SELECT WHERE STARE_CONT = PENDING`, include `NR_RESPINGERI` per rând
+- `listaUtilizatori(String stare)`: Dacă `stare = ALL`, rulează `findAll()`. Altfel, filtrează după starea primită (ex: `ACTIV`, `PENDING` etc.). Mapările în `UserPendingDto` includ și câmpul `stare` curent din DB.
 - `acceptaUser(Long userId)`: ⚠️ **devine operație DB pură, fără niciun apel Keycloak**:
   1. `User` cu `STARE_CONT = PENDING` (altfel `400`)
   2. `STARE_CONT = ACTIV`
@@ -537,7 +537,7 @@ public class AdminController {
 
     @GetMapping("/users")
     public List<UserPendingDto> listaUseri(@RequestParam(defaultValue = "PENDING") String stare) {
-        return adminUserService.listaCereriPending();
+        return adminUserService.listaUtilizatori(stare);
     }
 
     @PostMapping("/users/{id}/accept")
