@@ -1,0 +1,19 @@
+# application-local.properties.example
+# Copiază acest fișier ca 'application-local.properties' și completează valorile tale locale.
+# NU comite 'application-local.properties' în git (adăugat în .gitignore).
+#
+# Pornire cu profil local:
+#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+#   sau setează env var: SPRING_PROFILES_ACTIVE=local
+
+spring.datasource.url=jdbc:postgresql://localhost:5432/akadion
+spring.datasource.username=postgres
+spring.datasource.password=COMPLETEAZA_PAROLA_DB
+
+spring.security.oauth2.client.registration.keycloak.client-secret=COMPLETEAZA_SECRET_BACKEND_LOGIN
+spring.security.oauth2.client.registration.keycloak-admin.client-secret=COMPLETEAZA_SECRET_BACKEND_ADMIN_API
+
+# Sau, în mod recomandat, rulează cu variabilele de mediu setate direct:
+#   DB_PASSWORD=...
+#   KEYCLOAK_BACKEND_LOGIN_SECRET=...
+#   KEYCLOAK_ADMIN_API_SECRET=...
