@@ -33,6 +33,9 @@ public class Document extends BaseAuditableEntity {
     @Column(name = "status_index", nullable = false, length = 20)
     private DocumentStatusIndex statusIndex;
 
+    @Column(name = "hash_continut", length = 64)
+    private String hashContinut;
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean activ = true;

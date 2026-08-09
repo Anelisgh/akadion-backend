@@ -18,4 +18,8 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     @EntityGraph(attributePaths = {"saptamana", "saptamana.curs", "saptamana.curs.profesor"})
     Optional<Document> findWithSaptamanaAndCursAndProfesorById(Long id);
+
+    boolean existsBySaptamanaIdAndHashContinutAndActivTrue(Long saptamanaId, String hashContinut);
+
+    boolean existsBySaptamanaIdAndHashContinutAndIdNotAndActivTrue(Long saptamanaId, String hashContinut, Long id);
 }

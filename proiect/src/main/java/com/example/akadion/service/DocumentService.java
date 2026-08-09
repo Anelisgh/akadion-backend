@@ -11,9 +11,15 @@ import com.example.akadion.repository.SaptamanaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.apache.tika.Tika;
 import org.springframework.web.multipart.MultipartFile;
+import com.example.akadion.exception.DocumentDuplicatException;
 
+import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -21,7 +27,14 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class DocumentService {
 
-    private static final Set<String> PERMITTED_EXTENSIONS = Set.of("pdf", "docx", "pptx", "zip");
+    private static final Tika TIKA = new Tika();
+
+    private static final Map<String, Set<String>> EXPECTED_MIME_TYPES = Map.of(
+            "pdf", Set.of("application/pdf"),
+            "docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            "pptx", Set.of("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+            "zip", Set.of("application/zip")
+    );
 
     private final DocumentRepository documentRepository;
     private final SaptamanaRepository saptamanaRepository;
@@ -52,7 +65,12 @@ public class DocumentService {
             throw new AccesInterzisException("Nu aveți permisiunea de a adăuga un document în această săptămână.");
         }
 
-        validateFile(file);
+        byte[] fileBytes = validateFile(file);
+        String hashContinut = calculeazaHash(fileBytes);
+
+        if (documentRepository.existsBySaptamanaIdAndHashContinutAndActivTrue(saptamana.getId(), hashContinut)) {
+            throw new DocumentDuplicatException("Acest fișier a fost deja încărcat în această săptămână.");
+        }
 
         String path = minioStorageService.uploadFile(file, curs.getId(), saptamana.getId());
 
@@ -60,15 +78,24 @@ public class DocumentService {
                 .saptamana(saptamana)
                 .titlu(titlu)
                 .pathMinio(path)
+                .hashContinut(hashContinut)
                 .statusIndex(DocumentStatusIndex.PRELUAT)
                 .activ(true)
                 .build();
 
         try {
-            document = documentRepository.save(document);
+            document = documentRepository.saveAndFlush(document);
         } catch (Exception e) {
             log.error("Eroare la salvarea documentului în DB local. Ștergem fișierul orfan din MinIO.", e);
             minioStorageService.deleteFile(path);
+            
+            Throwable rootCause = e.getCause();
+            if (rootCause instanceof org.hibernate.exception.ConstraintViolationException cve) {
+                log.info("Constraint Name gasit: {}", cve.getConstraintName());
+                if ("uq_documente_hash_saptamana".equals(cve.getConstraintName())) {
+                    throw new DocumentDuplicatException("Acest fișier a fost deja încărcat în această săptămână.");
+                }
+            }
             throw e;
         }
 
@@ -92,19 +119,40 @@ public class DocumentService {
         }
 
         if (fisierNou != null) {
-            validateFile(fisierNou);
-            String pathVechi = document.getPathMinio();
+            byte[] fileBytes = validateFile(fisierNou);
+            String hashNou = calculeazaHash(fileBytes);
 
+            if (documentRepository.existsBySaptamanaIdAndHashContinutAndIdNotAndActivTrue(saptamana.getId(), hashNou, documentId)) {
+                throw new DocumentDuplicatException("Acest fișier a fost deja încărcat în această săptămână.");
+            }
+
+            String pathVechi = document.getPathMinio();
             String pathNou = minioStorageService.uploadFile(fisierNou, curs.getId(), saptamana.getId());
-            minioStorageService.deleteFile(pathVechi);
 
             document.setPathMinio(pathNou);
+            document.setHashContinut(hashNou);
             document.setStatusIndex(DocumentStatusIndex.PRELUAT);
             if (titlu != null) {
                 document.setTitlu(titlu);
             }
 
-            document = documentRepository.save(document);
+            try {
+                document = documentRepository.saveAndFlush(document);
+            } catch (Exception e) {
+                log.error("Eroare la salvarea documentului. Ștergem orfanul MinIO.", e);
+                minioStorageService.deleteFile(pathNou);
+                
+                Throwable rootCause = e.getCause();
+                if (rootCause instanceof org.hibernate.exception.ConstraintViolationException cve) {
+                    log.info("Constraint Name gasit: {}", cve.getConstraintName());
+                    if ("uq_documente_hash_saptamana".equals(cve.getConstraintName())) {
+                        throw new DocumentDuplicatException("Acest fișier a fost deja încărcat în această săptămână.");
+                    }
+                }
+                throw e;
+            }
+
+            minioStorageService.deleteFile(pathVechi);
 
             boolean succes = ragIngestService.trimiteLaIngest(document, saptamana, curs);
             document.setStatusIndex(succes ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
@@ -162,7 +210,12 @@ public class DocumentService {
         return toResponseDto(savedDocument);
     }
 
-    private void validateFile(MultipartFile file) {
+    /**
+     * Validarea cu Tika se asigură că extensia fișierului corespunde formatului real 
+     * (previne mascarea executabilelor în .pdf etc).
+     * NU scanează de malware/viruși.
+     */
+    private byte[] validateFile(MultipartFile file) {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Fișierul încărcat este gol.");
         }
@@ -170,9 +223,46 @@ public class DocumentService {
         String ext = (originalName != null && originalName.contains(".")) 
                 ? originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase() 
                 : "";
-        if (!PERMITTED_EXTENSIONS.contains(ext)) {
+                
+        Set<String> validMimes = EXPECTED_MIME_TYPES.get(ext);
+        if (validMimes == null) {
             throw new IllegalArgumentException("Tip de fișier nepermis. Sunt permise doar: pdf, docx, pptx, zip.");
         }
+
+        try {
+            byte[] bytes = file.getBytes();
+            String detectedType = TIKA.detect(bytes);
+            if (!validMimes.contains(detectedType)) {
+                log.warn("Tentativă de încărcare fișier invalid. Tika a detectat: {}, Extensie declarată: {}", detectedType, ext);
+                throw new IllegalArgumentException("Fișierul pare corupt sau are extensia greșită. Vă rugăm să verificați fișierul original.");
+            }
+            return bytes;
+        } catch (IOException e) {
+            log.error("Eroare la citirea conținutului fișierului pentru validarea Tika.", e);
+            throw new IllegalArgumentException("A apărut o eroare la procesarea fișierului. Vă rugăm să încercați din nou.");
+        }
+    }
+
+    private String calculeazaHash(byte[] continut) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] encodedhash = digest.digest(continut);
+            return bytesToHex(encodedhash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("Eroare la calcularea hash-ului", e);
+        }
+    }
+    
+    private String bytesToHex(byte[] hash) {
+        StringBuilder hexString = new StringBuilder(2 * hash.length);
+        for (int i = 0; i < hash.length; i++) {
+            String hex = Integer.toHexString(0xff & hash[i]);
+            if(hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 
     private DocumentResponseDto toResponseDto(Document document) {
