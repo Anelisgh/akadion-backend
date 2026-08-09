@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSXXX</timestampPattern>
+            <timeZone>Europe/Bucharest</timeZone>
+            <fieldNames>
+                <timestamp>ts</timestamp>
+                <message>msg</message>
+                <logger>logger</logger>
+                <level>level</level>
+                <thread>[ignore]</thread>
+                <levelValue>[ignore]</levelValue>
+                <version>[ignore]</version>
+            </fieldNames>
+            <includeTags>false</includeTags>
+            <customFields>{"service":"backend"}</customFields>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="JSON"/>
+    </root>
+</configuration>
