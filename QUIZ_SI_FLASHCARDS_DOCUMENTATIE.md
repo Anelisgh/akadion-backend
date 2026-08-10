@@ -1,6 +1,6 @@
 # Documentație Tehnică: Integrare Quiz & Flashcards Smart Aky
 
-Acest document descrie arhitectura, modificările efectuate și fluxul end-to-end pentru modulul de **Quiz** și **Flashcards** pe stiva AKADION (Spring Boot, React Frontend și Python RAG Service).
+Acest document descrie arhitectura, modificările efectuate, regulile de securitate și fluxul end-to-end pentru modulele de **Quiz** și **Flashcards** pe stiva AKADION (Spring Boot, React Frontend și Python RAG Service).
 
 ---
 
@@ -12,12 +12,12 @@ Acest document descrie arhitectura, modificările efectuate și fluxul end-to-en
              │ HTTP POST /api/student/cursuri/{cursId}/flashcards/generate
              ▼
 [ Monolit Spring Boot (StudentController -> StudentCursService) ]
-             │  (Verificare acces student, săptămână maximă parcursă, ratelimit)
+             │  (Verificare rol STUDENT, cont ACTIV, înrolare, săptămână parcursă, rate limiting)
              │
              │ HTTP POST /flashcards/generate (cu secret BasicAuth)
              ▼
 [ Serviciul Python RAG (llm-response / FastAPI) ]
-             │  (Extragere contexte relevante din Vector DB Qdrant, construire prompt)
+             │  (Căutare contexte în Vector DB Qdrant, construire prompt cu Grounding)
              │
              │ API Call (Gemini 2.5 Flash / JSON Mode)
              ▼
@@ -26,77 +26,115 @@ Acest document descrie arhitectura, modificările efectuate și fluxul end-to-en
 
 ---
 
-## 2. Fișiere Modificate și Relaționarea lor
+## 2. Structura Datelor (JSON Schemas & Payloads)
+
+### Cerere Frontend -> Monolit Spring Boot:
+`POST /api/student/cursuri/{cursId}/flashcards/generate`
+```json
+{
+  "documentId": 12,
+  "nrFlashcards": 5
+}
+```
+*(Câmpurile `documentId` și `nrFlashcards` sunt opționale; dacă `documentId` este `null`, se folosesc toate documentele accesibile).*
+
+### Cerere Monolit -> Serviciu Python RAG:
+`POST http://llm-response:8000/flashcards/generate`
+```json
+{
+  "cursId": 1,
+  "maxSaptamana": 3,
+  "documentId": 12,
+  "nrFlashcards": 5
+}
+```
+
+### Răspuns Serviciu Python RAG / Monolit -> Frontend (Flashcards):
+```json
+[
+  {
+    "fata": "Ce reprezintă încapsularea în POO?",
+    "verso": "Mecanismul de ascundere a datelor interne ale unei clase și de restricționare a accesului direct prin metode publice (getters/setters)."
+  }
+]
+```
+
+### Răspuns Serviciu Python RAG / Monolit -> Frontend (Quiz):
+```json
+[
+  {
+    "intrebare": "Care dintre următoarele afirmații despre moștenire este adevărată?",
+    "optiuni": {
+      "A": "O clasă derivată moștenește membrii privați.",
+      "B": "O clasă poate moșteni direct mai multe clase în Java.",
+      "C": "Moștenirea permite reutilizarea codului și polimorfismul.",
+      "D": "Clasa Object nu este clasa rădăcină în Java."
+    },
+    "raspuns_corect": "C",
+    "explicatie": "În Java, moștenirea simplă permite unei clase să refolosească atributele și metodele publice/protected ale clasei părinte."
+  }
+]
+```
+
+---
+
+## 3. Fișiere Modificate și Relaționarea lor
 
 ### A. Backend Monolit (Java / Spring Boot)
 
 1. **`FlashcardGenerateRequestDto.java`** (`backend/proiect/src/main/java/com/example/akadion/dto/`)
-   - **Ce face**: DTO (Record Java) care încapsulează parametrii opționali trimiși de frontend: `documentId` (opțional, pentru limitarea la un singur fișier) și `nrFlashcards` (implicit 5, maxim 20).
-   - **De ce**: Oferă o structură strongly-typed pentru validarea datelor de intrare.
+   - **Ce face**: DTO (Record Java) care încapsulează parametrii: `documentId` (opțional) și `nrFlashcards` (1 - 20).
 
 2. **`StudentController.java`** (`backend/proiect/src/main/java/com/example/akadion/controller/`)
-   - **Ce face**: Expune endpoint-ul securizat `@PostMapping("/cursuri/{cursId}/flashcards/generate")`.
-   - **De ce**: Permite studenților autentificați să solicite generarea de flashcards pentru un curs la care sunt înrolați.
+   - **Ce face**: Expune endpoint-ul securizat `@PostMapping("/cursuri/{cursId}/flashcards/generate")` protejat de `@PreAuthorize("hasRole('STUDENT')")`.
 
 3. **`StudentCursService.java`** (`backend/proiect/src/main/java/com/example/akadion/service/`)
    - **Ce face**:
-     - `determinaSaptamanaParcursaMax()`: Calculează săptămâna maximă permisă pentru student pe baza parcursului său.
-     - `genereazaFlashcards()`: Validează că studentul este activ înrolat, că documentul selectat aparține cursului și nu depășește săptămâna parcursă, apoi delegă către `RagChatService`.
-   - **De ce**: Asigură securitatea la nivel de domeniu (un student nu poate genera fișe/quiz-uri din săptămâni viitoare pe care nu le-a deblocat încă).
+     - `determinaSaptamanaParcursaMax()`: Calculează săptămâna maximă parcursă de student pe baza intrărilor din `parcursRepository`.
+     - `genereazaFlashcards()`: Validează că:
+       1. Studentul are cont local `ACTIV` și înrolare activă la curs.
+       2. Numărul de fișe este între 1 și 20.
+       3. Dacă se specifică un `documentId`, verifică că fișierul este activ, aparține cursului și că `nrSaptamana` <= `maxSaptamana`.
+       4. Aplică rate-limiting-ul local (`checkRateLimit`).
 
 4. **`RagChatService.java`** (`backend/proiect/src/main/java/com/example/akadion/service/`)
    - **Ce face**:
-     - `genereazaFlashcards()`: Realizează apelul HTTP REST către serviciul Python RAG pe endpoint-ul `/flashcards/generate`.
-     - `genereazaQuiz()`: S-au adăugat null-checks pentru payload-ul trimis către RAG (`maxSaptamana`, `documentId`, `nrIntrebari`).
-   - **De ce**: Intermediază comunicarea securizată între monolitul Spring și microserviciul Python RAG.
+     - `genereazaFlashcards()`: Execută cererea HTTP POST către microserviciul Python RAG.
+     - `genereazaQuiz()`: Actualizate null-check-urile pentru payload (`maxSaptamana`, `documentId`, `nrIntrebari`).
 
 ---
 
 ### B. Microserviciul Python RAG (`rag/llm-response/`)
 
 1. **`models.py`**
-   - **Ce face**: Definește modelele Pydantic:
-     - `FlashcardGenerateRequest`: Parametrii cererii (`cursId`, `maxSaptamana`, `documentId`, `nrFlashcards`).
-     - `FlashcardItem`: Formatul de răspuns (`fata`: concept/întrebare, `verso`: definiție/răspuns).
-   - **De ce**: Asigură validarea payload-ului JSON primit de la Spring Boot și serializarea corectă a răspunsului.
+   - Modele Pydantic: `FlashcardGenerateRequest` (`cursId`, `maxSaptamanaParcursa`, `maxSaptamana`, `documentId`, `nrFlashcards`) și `FlashcardItem` (`fata`, `verso`).
 
 2. **`prompt_builder.py`**
-   - **Ce face**: Definește funcția `construieste_prompt_flashcards(...)`.
-   - **De ce**: Generează instrucțiunile stricte (Grounding & JSON Schema) pentru modelul LLM, forțând returnarea unui tablou JSON cu exact numărul de fișe solicitate bazate exclusiv pe textele din cursurile parcurse.
+   - Funcția `construieste_prompt_flashcards(...)`: Construiește prompt-ul de sistem cu instrucțiuni stricte de Grounding (fără halucinații, răspuns strict JSON cu cheile `"fata"` și `"verso"`).
 
 3. **`main.py`**
-   - **Ce face**:
-     - Expune endpoint-ul `@app.post("/flashcards/generate")`.
-     - Adaugă funcția `_normalizeaza_flashcards(...)` care procesează răspunsul brut de la LLM în obiecte `FlashcardItem`.
-   - **De ce**: Pune la dispoziție serviciul propriu-zis de generare AI pentru flashcards.
+   - Endpoint-ul `@app.post("/flashcards/generate")` și funcția `_normalizeaza_flashcards(...)` care extrage și curăță răspunsul JSON returnat de Gemini.
 
 ---
 
 ### C. Frontend (React / Tailwind / Lucide Icons)
 
 1. **`conversatii.js`** (`frontend/src/lib/`)
-   - **Ce face**: Adaugă funcția `genereazaFlashcards(cursId, documentId, nrFlashcards)` care apelează API-ul monolitului și adaptează `genereazaQuiz`.
-   - **De ce**: Încheagă comunicarea dintre componentele React și API-ul Spring.
+   - Funcția `genereazaFlashcards(cursId, documentId, nrFlashcards)` pentru apelarea API-ului Spring.
 
 2. **`AkyChatWidget.jsx`** (`frontend/src/components/chat/`)
-   - **Ce face**:
-     - Integrarea interfeței Flashcards în panoul lateral cu efect 3D Flip (rotire card la apăsare între `fata` și `verso`).
-     - Păstrarea butonului original de Quiz (`"Aky e gata de examen. Tu? QUIZ"`) și adăugarea noului buton `"Flashcards"`.
-     - Suport pentru ambele moduri de studiu (Quiz în-chat / Quiz panou lateral și Flashcards panou lateral).
-   - **De ce**: Oferă studentului o experiență interactivă și modernă de memorare activă și autoevaluare.
+   - Stări noi React: `rightPanelMode` (`null` | `'quiz'` | `'flashcards'`), `flashcardQuestions`, `currentFlashcardIndex`, `isFlashcardFlipped`, `isFlashcardsLoading`, etc.
+   - Componentă UI 3D Flip Card: Folosește `perspective: 1000px`, `transformStyle: preserve-3d` și `transform: rotateY(180deg)` pentru rotire fluidă între concept (față) și răspuns (verso).
+   - Buton dual în header: Butonul de Quiz cu textul original (`"Aky e gata de examen. Tu? QUIZ"`) și butonul de `"Flashcards"`.
 
 ---
 
-## 3. Rezumatul Modificărilor și Rationale-ul lor
+## 4. Regulile de Securitate și Limitări (Business Rules)
 
-| Componentă | Modificare efectuată | Rationale (De ce?) |
-|---|---|---|
-| **Spring DTO** | `FlashcardGenerateRequestDto.java` | Mapping curat al parametrilor cererii de flashcards. |
-| **Spring Controller** | `POST /cursuri/{cursId}/flashcards/generate` | Punct de acces REST securizat pentru studenți. |
-| **Spring Service** | Metoda `genereazaFlashcards` + fix week calculation | Control al accesului pe bază de drepturi și progres. |
-| **Spring RAG Client** | Client RestClient pentru `/flashcards/generate` | Comunicare monolit -> microserviciu RAG. |
-| **Python RAG** | Pydantic Models, System Prompt, FastAPI endpoint | Generare propriu-zisă de flashcards cu Gemini LLM. |
-| **Frontend UI** | Interfață 3D Flip Card Flashcards + Buton Dual Header | Experiență UI/UX fluidă de studiu. |
+- **Access Control**: Generarea de flashcards și quiz-uri este permisă exclusiv studenților înrolați activ la cursul respectiv.
+- **Bounding Context (Grounding)**: Un student poate genera fișe/întrebări doar din documente ce aparțin săptămânilor deja finalizate sau accesibile de el (`nrSaptamana <= maxSaptamanaParcursa`).
+- **Rate Limiting**: Cererile sunt limitate per utilizator (sliding window 10 cereri / minut) pentru prevenirea abuzului de tokeni Gemini.
 
 ---
-*Documentație generată automat pentru repository-ul Akadion.*
+*Documentație completă pentru repository-ul Akadion.*
+
