@@ -108,6 +108,15 @@ public class StudentController {
         return studentCursService.genereazaQuiz(user.getId(), cursId, request);
     }
 
+    @PostMapping("/cursuri/{cursId}/flashcards/generate")
+    public List<Map<String, Object>> genereazaFlashcards(
+            @PathVariable Long cursId,
+            @RequestBody FlashcardGenerateRequestDto request,
+            @AuthenticationPrincipal OidcUser oidcUser) {
+        User user = getLoggedUser(oidcUser);
+        return studentCursService.genereazaFlashcards(user.getId(), cursId, request);
+    }
+
     private User getLoggedUser(OidcUser oidcUser) {
         return userRepository.findByIdKeycloak(oidcUser.getSubject())
                 .orElseThrow(() -> new UserNotFoundException("Utilizatorul autentificat nu are cont local."));
