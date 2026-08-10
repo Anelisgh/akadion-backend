@@ -29,6 +29,7 @@ public class StudentCursService {
     private final DocumentRepository documentRepository;
     private final MinioStorageService minioStorageService;
     private final RagChatService ragChatService;
+    private final AuditLogService auditLogService;
 
     @Autowired
     @Lazy
@@ -55,6 +56,14 @@ public class StudentCursService {
             }
             enrollment.setActiv(true);
             userCursRepository.save(enrollment);
+            
+            auditLogService.inregistreaza(
+                    "user_curs",
+                    enrollment.getId(),
+                    "INSCRIERE",
+                    Map.of("cursId", cursId, "activ", false),
+                    Map.of("cursId", cursId, "activ", true)
+            );
             log.info("Înrolarea studentului {} la cursul {} a fost reactivată.", studentId, cursId);
         } else {
             UserCurs newEnrollment = UserCurs.builder()
@@ -63,6 +72,14 @@ public class StudentCursService {
                     .activ(true)
                     .build();
             userCursRepository.save(newEnrollment);
+            
+            auditLogService.inregistreaza(
+                    "user_curs",
+                    newEnrollment.getId(),
+                    "INSCRIERE",
+                    null,
+                    Map.of("cursId", cursId, "activ", true)
+            );
             log.info("Înrolare nouă creată pentru studentul {} la cursul {}.", studentId, cursId);
         }
     }
@@ -78,6 +95,14 @@ public class StudentCursService {
 
         enrollment.setActiv(false);
         userCursRepository.save(enrollment);
+        
+        auditLogService.inregistreaza(
+                "user_curs",
+                enrollment.getId(),
+                "RETRAGERE",
+                Map.of("cursId", cursId, "activ", true),
+                Map.of("cursId", cursId, "activ", false)
+        );
         log.info("Studentul {} s-a retras de la cursul {}.", studentId, cursId);
     }
 

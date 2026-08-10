@@ -41,4 +41,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Override
     @EntityGraph(attributePaths = {"rol", "stareCont"})
     java.util.List<User> findAll();
+
+    // 4. Caută utilizatorii în funcție de o listă de ID-uri Keycloak (folosit pentru maparea în masă la audit-log).
+    @EntityGraph(attributePaths = {"rol", "stareCont"})
+    List<User> findByIdKeycloakIn(List<String> idKeycloakList);
 }

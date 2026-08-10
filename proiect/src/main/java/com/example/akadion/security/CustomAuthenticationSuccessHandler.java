@@ -35,7 +35,7 @@ public class CustomAuthenticationSuccessHandler implements AuthenticationSuccess
     private static final String INCOMPLETE_STATE = "INCOMPLET";
 
     private final UserRepository userRepository;
-    private final StareContRepository stareContRepository;
+    private final com.example.akadion.service.UserProfileService userProfileService;
 
     @Value("${app.frontend.base-url}")
     private String frontendBaseUrl; // Adresa de React (ex: http://localhost:5173)
@@ -64,23 +64,7 @@ public class CustomAuthenticationSuccessHandler implements AuthenticationSuccess
 
             // Cazul A: Utilizatorul NU există în baza noastră de date (este prima dată când se loghează după ce s-a înregistrat pe Keycloak).
             if (userOpt.isEmpty()) {
-                userRepository.findByMail(email)
-                        .ifPresent(existingUser -> {
-                            throw new ForbiddenOperationException(
-                                    "Există deja un cont local asociat cu emailul " + existingUser.getMail() + ".");
-                        });
-
-                StareCont incomplete = stareContRepository.findByDenumire(INCOMPLETE_STATE)
-                        .orElseThrow(() -> new IllegalStateException("Starea INCOMPLET lipsește din DB."));
-
-                User user = new User();
-                user.setIdKeycloak(sub);
-                user.setMail(email);
-                user.setStareCont(incomplete);
-                user.setNrRespingeri(0);
-
-                userRepository.save(user);
-                log.info("Primul login pentru sub={}. Utilizator local creat în starea INCOMPLET.", sub);
+                userProfileService.inregistreazaUserNou(sub, email);
                 redirectUrl = frontendBaseUrl + "/complete-profile";
             }
             // Cazul B: Utilizatorul există deja în DB (s-a mai logat în trecut).

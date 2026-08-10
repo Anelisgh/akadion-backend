@@ -16,6 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -27,6 +29,7 @@ public class CompleteProfileService {
     private final UserRepository userRepository;
     private final RolRepository rolRepository;
     private final StareContRepository stareContRepository;
+    private final AuditLogService auditLogService;
 
     // Adnotația @Transactional garantează că toate operațiunile din această metodă se execută ca o singură tranzacție.
     // Dacă ceva dă eroare pe parcurs, toate modificările din baza de date se anulează automat (rollback).
@@ -42,6 +45,14 @@ public class CompleteProfileService {
         updateExistingUser(user, normalizedEmail, dto);
 
         User savedUser = userRepository.save(user);
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                savedUser.getId(),
+                "COMPLETARE_PROFIL",
+                null,
+                Map.of("rolDorit", dto.rolDorit(), "facultate", dto.facultate())
+        );
         log.info("Profil salvat pentru sub={} în starea PENDING.", normalizedSub);
         return toResponse(savedUser);
     }

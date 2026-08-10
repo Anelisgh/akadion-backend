@@ -1,4 +1,4 @@
-﻿# Documentație: Arhitectură și Configurări (Pachetul `com.example.akadion.config`)
+# Documentație: Arhitectură și Configurări (Pachetul `com.example.akadion.config`)
 
 Acest document acoperă setările fundamentale, arhitectura de boot și configurările din pachetul `com.example.akadion.config`.
 
@@ -45,7 +45,19 @@ Aplicația este un monolit modular construit în Spring Boot 3. Conține o arhit
 
 ### 2.6. SecurityConfig
 - **Scop:** Interceptează request-urile. Definește logica OIDC.
-- Aici se atașează `CustomAuthenticationSuccessHandler`, `CustomAuthoritiesMapper`, filtrele `CsrfCookieFilter` și `StareContFilter`.
+- Aici se atașează `CustomAuthenticationSuccessHandler`, `CustomAuthoritiesMapper`, filtrele `CsrfCookieFilter`, `StareContFilter`, `RequestIdFilter` și `AccessLogFilter`.
+
+### 2.7. RequestIdFilter
+- **Scop:** Adaugă un identificator unic (`X-Request-ID`) fiecărui request HTTP pentru trasabilitate și debug.
+- **Implementare:** Este un `OncePerRequestFilter` cu `@Order(Ordered.HIGHEST_PRECEDENCE)`. Preia header-ul `X-Request-ID` sau generează un UUID nou, îl pune în `MDC` (Mapped Diagnostic Context) pentru a apărea automat în log-uri, și îl atașează la response.
+
+### 2.8. AccessLogFilter
+- **Scop:** Jurnalizează toate request-urile HTTP primite (metodă, path, status code, durată de execuție, utilizator).
+- **Implementare:** Este un `OncePerRequestFilter` cu `@Order(Ordered.LOWEST_PRECEDENCE)`. Extrage utilizatorul curent din `SecurityContextHolder` și utilizează Logstash-Logback pentru log-uri structurate (`kv("duration_ms", ...)`).
+
+### 2.9. RagClientConfig
+- **Scop:** Configurează clienții HTTP (`RestClient`) pentru comunicarea cu serviciul extern RAG.
+- **Implementare:** Expune două bean-uri de `RestClient`: `ragChatRestClient` și `ragEmbedderRestClient`. Configurează **Basic Authentication** și interceptează cererile (`ClientHttpRequestInterceptor`) pentru a propaga antetele `X-Request-ID` și `X-User` (utilizatorul curent).
 
 ## 3. Aplicația - Punct de Intrare (`AkadionApplication`)
 - Simplă clasă Spring Boot ce inițiază serverul Tomcat.

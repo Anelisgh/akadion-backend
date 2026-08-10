@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -31,6 +32,7 @@ public class SaptamanaService {
     private final CursService cursService;
     private final MinioStorageService minioStorageService;
     private final RagIngestService ragIngestService;
+    private final AuditLogService auditLogService;
 
     public List<SaptamanaResponseDto> listaSaptamani(Long cursId, Long callerId, String callerRole) {
         Curs curs = cursRepository.findById(cursId)
@@ -74,6 +76,14 @@ public class SaptamanaService {
 
         cursService.recalculeazaDataSfarsit(curs);
         cursRepository.save(curs);
+        
+        auditLogService.inregistreaza(
+                "saptamana",
+                saptamana.getId(),
+                "CREARE",
+                null,
+                Map.of("nrSaptamana", nrSaptamana, "descriere", saptamana.getDescriere())
+        );
 
         log.info("Săptămână adăugată: saptamanaId={}, nrSaptamana={}, la cursId={}", 
                 saptamana.getId(), nrSaptamana, cursId);
@@ -89,8 +99,19 @@ public class SaptamanaService {
             throw new AccesInterzisException("Nu aveți permisiunea de a modifica această săptămână.");
         }
 
+        String oldDescriere = saptamana.getDescriere();
+        
         saptamana.setDescriere(dto.descriere());
         Saptamana savedSaptamana = saptamanaRepository.save(saptamana);
+        
+        auditLogService.inregistreaza(
+                "saptamana",
+                saptamanaId,
+                "EDITARE",
+                Map.of("descriere", oldDescriere == null ? "" : oldDescriere),
+                Map.of("descriere", savedSaptamana.getDescriere() == null ? "" : savedSaptamana.getDescriere())
+        );
+        
         log.info("Săptămână modificată: saptamanaId={}", saptamanaId);
         return toResponseDto(savedSaptamana);
     }
@@ -132,6 +153,15 @@ public class SaptamanaService {
         for (Long docId : idDocumente) {
             ragIngestService.stergeDinIngest(docId);
         }
+        
+        auditLogService.inregistreaza(
+                "saptamana",
+                saptamanaId,
+                "STERGERE",
+                Map.of("nrSaptamana", saptamana.getNrSaptamana(), "descriere", saptamana.getDescriere(), "nrDocumenteAsociate", documente.size()),
+                null
+        );
+        
         log.info("Săptămână ștearsă (ultima): saptamanaId={}, nrSaptamana={}, la cursId={}", 
                 saptamanaId, saptamana.getNrSaptamana(), curs.getId());
     }

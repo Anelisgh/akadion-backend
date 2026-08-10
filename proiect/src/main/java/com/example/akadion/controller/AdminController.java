@@ -31,6 +31,7 @@ public class AdminController {
     private final CursService cursService;
     private final SaptamanaService saptamanaService;
     private final DocumentService documentService;
+    private final com.example.akadion.service.AuditLogService auditLogService;
 
     // 1. Listează utilizatorii din sistem în funcție de starea lor.
     // Apel implicit (doar cei în așteptare): GET /api/admin/users?stare=PENDING
@@ -116,5 +117,11 @@ public class AdminController {
     @GetMapping("/cursuri/{cursId}/profesor")
     public ProfesorDetaliiResponseDto detaliiProfesorCurs(@PathVariable Long cursId) {
         return cursService.getDetaliiProfesorCurs(cursId);
+    }
+
+    @GetMapping("/audit-log")
+    public org.springframework.data.domain.Slice<com.example.akadion.dto.AuditLogDto> getAuditLog(
+            org.springframework.data.domain.Pageable pageable) {
+        return auditLogService.getAuditLog(pageable);
     }
 }

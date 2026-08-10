@@ -6,6 +6,7 @@ import com.example.akadion.dto.UserMeDto;
 import com.example.akadion.entity.User;
 import com.example.akadion.exception.ForbiddenOperationException;
 import com.example.akadion.exception.UserNotFoundException;
+import com.example.akadion.repository.StareContRepository;
 import com.example.akadion.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -23,7 +25,9 @@ import java.util.Locale;
 public class UserProfileService {
 
     private final UserRepository userRepository;
+    private final StareContRepository stareContRepository;
     private final KeycloakAdminService keycloakAdminService;
+    private final AuditLogService auditLogService;
 
     @Value("${app.frontend.base-url}")
     private String frontendUrl;
@@ -31,14 +35,59 @@ public class UserProfileService {
     private static final String KEYCLOAK_CLIENT_ID = "backend-login";
 
     @Transactional
+    public void inregistreazaUserNou(String idKeycloak, String email) {
+        userRepository.findByMail(email)
+                .ifPresent(existingUser -> {
+                    throw new ForbiddenOperationException(
+                            "Există deja un cont local asociat cu emailul " + existingUser.getMail() + ".");
+                });
+
+        com.example.akadion.entity.StareCont incomplete = stareContRepository.findByDenumire("INCOMPLET")
+                .orElseThrow(() -> new IllegalStateException("Starea INCOMPLET lipsește din DB."));
+
+        User user = new User();
+        user.setIdKeycloak(idKeycloak);
+        user.setMail(email);
+        user.setStareCont(incomplete);
+        user.setNrRespingeri(0);
+
+        user = userRepository.save(user);
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                user.getId(),
+                "CREARE_CONT",
+                null,
+                Map.of("mail", email, "stare", "INCOMPLET")
+        );
+        log.info("Primul login pentru sub={}. Utilizator local creat în starea INCOMPLET.", idKeycloak);
+    }
+
+    @Transactional
     public UserMeDto updateProfile(String idKeycloak, UpdateProfileRequestDto dto) {
         User user = getUserByIdKeycloak(idKeycloak);
+
+        String oldNume = user.getNume();
+        String oldPrenume = user.getPrenume();
+        String oldFacultate = user.getFacultate();
 
         user.setNume(dto.nume().trim());
         user.setPrenume(dto.prenume().trim());
         user.setFacultate(dto.facultate().trim());
 
         User savedUser = userRepository.save(user);
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                savedUser.getId(),
+                "EDITARE_PROFIL",
+                Map.of("nume", oldNume == null ? "" : oldNume, 
+                       "prenume", oldPrenume == null ? "" : oldPrenume, 
+                       "facultate", oldFacultate == null ? "" : oldFacultate),
+                Map.of("nume", savedUser.getNume(), 
+                       "prenume", savedUser.getPrenume(), 
+                       "facultate", savedUser.getFacultate())
+        );
         log.info("Profil actualizat (local) pentru user-ul cu idKeycloak={}", idKeycloak);
 
         return toUserMeDto(savedUser);
@@ -92,6 +141,14 @@ public class UserProfileService {
         } catch (Exception e) {
             log.warn("Nu s-a putut trimite e-mailul VERIFY_EMAIL din Keycloak (posibil SMTP neconfigurat) pentru idKeycloak={}: {}", idKeycloak, e.getMessage());
         }
+
+        auditLogService.inregistreaza(
+                "app_user",
+                user.getId(),
+                "SCHIMBARE_EMAIL",
+                Map.of("mail", oldEmail),
+                Map.of("mail", newEmail)
+        );
 
         log.info("Email actualizat cu succes pentru idKeycloak={}.", idKeycloak);
         return toUserMeDto(user);

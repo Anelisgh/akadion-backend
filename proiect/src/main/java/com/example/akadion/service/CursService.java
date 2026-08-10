@@ -19,7 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -30,6 +32,7 @@ public class CursService {
     private final SaptamanaRepository saptamanaRepository;
     private final UserCursRepository userCursRepository;
     private final UserRepository userRepository;
+    private final AuditLogService auditLogService;
 
     public List<CursResponseDto> listaCursuriProprii(Long profesorId) {
         return cursRepository.findByProfesorId(profesorId).stream()
@@ -112,6 +115,15 @@ public class CursService {
                 .build();
 
         Curs savedCurs = cursRepository.save(curs);
+        
+        auditLogService.inregistreaza(
+                "curs",
+                savedCurs.getId(),
+                "CREARE",
+                null,
+                Map.of("denumire", savedCurs.getDenumire(), "dataInceput", savedCurs.getDataInceput() != null ? savedCurs.getDataInceput().toString() : "")
+        );
+        
         log.info("Curs creat: cursId={}, de profesorId={}", savedCurs.getId(), profesorId);
         return toResponseDto(savedCurs);
     }
@@ -124,6 +136,9 @@ public class CursService {
         if (!curs.getProfesor().getId().equals(profesorId)) {
             throw new AccesInterzisException("Nu aveți permisiunea de a modifica acest curs.");
         }
+
+        String oldDenumire = curs.getDenumire();
+        String oldDescriere = curs.getDescriere();
 
         curs.setDenumire(dto.denumire());
         curs.setDescriere(dto.descriere());
@@ -144,6 +159,15 @@ public class CursService {
         }
 
         Curs savedCurs = cursRepository.save(curs);
+        
+        auditLogService.inregistreaza(
+                "curs",
+                savedCurs.getId(),
+                "EDITARE",
+                Map.of("denumire", oldDenumire, "descriere", oldDescriere, "dataInceput", vecheaDataInceput != null ? vecheaDataInceput.toString() : ""),
+                Map.of("denumire", savedCurs.getDenumire(), "descriere", savedCurs.getDescriere(), "dataInceput", savedCurs.getDataInceput() != null ? savedCurs.getDataInceput().toString() : "")
+        );
+        
         log.info("Curs modificat: cursId={}", savedCurs.getId());
         return toResponseDto(savedCurs);
     }
@@ -171,6 +195,15 @@ public class CursService {
                 userCursRepository.save(userCurs);
             }
         }
+        
+        auditLogService.inregistreaza(
+                "curs",
+                cursId,
+                "DEZACTIVARE",
+                Map.of("activ", true),
+                Map.of("activ", false)
+        );
+        
         log.info("Curs dezactivat de profesor: cursId={}", cursId);
     }
 
@@ -189,6 +222,15 @@ public class CursService {
 
         curs.setActiv(true);
         cursRepository.save(curs);
+        
+        auditLogService.inregistreaza(
+                "curs",
+                cursId,
+                "ACTIVARE",
+                Map.of("activ", false),
+                Map.of("activ", true)
+        );
+        
         log.info("Curs activat de profesor: cursId={}", cursId);
     }
 

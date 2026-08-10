@@ -46,11 +46,14 @@ class AdminUserServiceTest {
     @Mock
     private CursService cursService;
 
+    @Mock
+    private AuditLogService auditLogService;
+
     private AdminUserService adminUserService;
 
     @BeforeEach
     void setUp() {
-        adminUserService = new AdminUserService(userRepository, stareContRepository, userCursRepository, keycloakAdminService, cursService);
+        adminUserService = new AdminUserService(userRepository, stareContRepository, userCursRepository, keycloakAdminService, cursService, auditLogService);
     }
 
     @Test

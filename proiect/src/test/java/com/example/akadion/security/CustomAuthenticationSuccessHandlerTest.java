@@ -3,8 +3,8 @@ package com.example.akadion.security;
 import com.example.akadion.entity.Rol;
 import com.example.akadion.entity.StareCont;
 import com.example.akadion.entity.User;
-import com.example.akadion.repository.StareContRepository;
 import com.example.akadion.repository.UserRepository;
+import com.example.akadion.service.UserProfileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,29 +34,23 @@ class CustomAuthenticationSuccessHandlerTest {
     private static final String FRONTEND_BASE_URL = "http://localhost:5173";
 
     private UserRepository userRepository;
-    private StareContRepository stareContRepository;
+    private UserProfileService userProfileService;
     private CustomAuthenticationSuccessHandler successHandler;
 
     @BeforeEach
     void setUp() {
         userRepository = mock(UserRepository.class);
-        stareContRepository = mock(StareContRepository.class);
-        successHandler = new CustomAuthenticationSuccessHandler(userRepository, stareContRepository);
+        userProfileService = mock(UserProfileService.class);
+        successHandler = new CustomAuthenticationSuccessHandler(userRepository, userProfileService);
         ReflectionTestUtils.setField(successHandler, "frontendBaseUrl", FRONTEND_BASE_URL);
     }
 
     @Test
     void firstLoginCreatesLocalIncompleteUserAndRedirectsToCompleteProfile() throws Exception {
         when(userRepository.findByIdKeycloak("sub-new")).thenReturn(Optional.empty());
-        when(userRepository.findByMail("new.user@akadion.test")).thenReturn(Optional.empty());
-        when(stareContRepository.findByDenumire("INCOMPLET")).thenReturn(Optional.of(stareCont("INCOMPLET")));
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
-            assertThat(response.getRedirectedUrl()).isNull();
-            return invocation.getArgument(0);
-        });
 
         successHandler.onAuthenticationSuccess(
                 request,
@@ -64,13 +58,7 @@ class CustomAuthenticationSuccessHandlerTest {
                 new TestingAuthenticationToken(oidcUser("sub-new", "  New.User@Akadion.Test  "), null)
         );
 
-        verify(userRepository).save(any(User.class));
-        User saved = captureSavedUser();
-        assertThat(saved.getIdKeycloak()).isEqualTo("sub-new");
-        assertThat(saved.getMail()).isEqualTo("new.user@akadion.test");
-        assertThat(saved.getStareCont().getDenumire()).isEqualTo("INCOMPLET");
-        assertThat(saved.getNrRespingeri()).isZero();
-        assertThat(saved.getRol()).isNull();
+        verify(userProfileService).inregistreazaUserNou("sub-new", "new.user@akadion.test");
         assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/complete-profile");
     }
 
@@ -137,22 +125,17 @@ class CustomAuthenticationSuccessHandlerTest {
     @Test
     void missingIncompleteStateInDatabaseIsHandledWithControlledJsonError() throws Exception {
         when(userRepository.findByIdKeycloak("sub-new")).thenReturn(Optional.empty());
-        when(userRepository.findByMail("new@akadion.test")).thenReturn(Optional.empty());
-        when(stareContRepository.findByDenumire("INCOMPLET")).thenReturn(Optional.empty());
+        // Since we moved this logic to the service, this test should just simulate a service exception
+        org.mockito.Mockito.doThrow(new IllegalStateException("Starea INCOMPLET lipsește din DB")).when(userProfileService).inregistreazaUserNou(any(), any());
 
         MockHttpServletResponse response = performSuccess("sub-new", "new@akadion.test");
 
-        verify(userRepository, never()).save(any(User.class));
         assertThat(response.getStatus()).isEqualTo(500);
         assertThat(response.getContentAsString()).contains("Starea INCOMPLET lipsește din DB");
         assertThat(response.getRedirectedUrl()).isNull();
     }
 
-    private User captureSavedUser() {
-        org.mockito.ArgumentCaptor<User> captor = org.mockito.ArgumentCaptor.forClass(User.class);
-        verify(userRepository).save(captor.capture());
-        return captor.getValue();
-    }
+
 
     private MockHttpServletResponse performSuccess(String subject, String email) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();

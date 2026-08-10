@@ -1,4 +1,4 @@
-﻿# Documentație: Entități JPA și Structura Bazei de Date
+# Documentație: Entități JPA și Structura Bazei de Date
 
 Această documentație detaliază structura completă a bazei de date a proiectului **Akadion**, incluzând entitățile, câmpurile, relațiile, constrângerile de unicitate, indecșii și sistemul automat de audit.
 
@@ -77,10 +77,11 @@ Reprezintă starea în care se află contul unui utilizator în workflow-ul de a
   - `titlu`: `String` (NOT NULL).
   - `pathMinio`: `String` (NOT NULL, max 512). Calea completă din bucket-ul MinIO `course-documents`.
   - `statusIndex`: `DocumentStatusIndex` (Enum: `PRELUAT`, `TRIMIS`, `ERONAT`). Starea interacțiunii documentului cu sistemul RAG de la FastAPI.
+  - `hashContinut`: `String` (Nullable, max 64). Salvează hash-ul SHA-256 al fișierului pentru a preveni duplicatele la nivel de săptămână.
   - `activ`: `Boolean` (NOT NULL, default true).
 - **Relații:**
   - `saptamana`: `@ManyToOne` (Către `Saptamana`, NOT NULL).
-- **Indecși:** `id_saptamana`.
+- **Indecși:** `id_saptamana`. Constrângere unică pe `(id_saptamana, hash_continut)`.
 
 ### 3.5. UserCurs (`user_cursuri`)
 - **Scop:** Tabelă de joncțiune ce marchează înrolarea unui student la un anumit curs.
@@ -102,3 +103,40 @@ Reprezintă starea în care se află contul unui utilizator în workflow-ul de a
   - `saptamana`: `@ManyToOne` (Către `Saptamana`, NOT NULL).
 - **Indecși/Constrângeri:**
   - Unique Constraint: `(id_user_curs, id_saptamana)`. Previne bifarea de mai multe ori a aceleiași săptămâni.
+
+### 3.7. Conversatie (`conversatii`)
+- **Scop:** Reține o sesiune de chat între un utilizator (student sau profesor) și asistentul AI (Aky) pe un anumit curs.
+- **Câmpuri:**
+  - `id`: `Long` (PK)
+  - `titlu`: `String` (NOT NULL, max 255) - Generat automat din primele max 40 caractere ale primei întrebări.
+  - `activ`: `Boolean` (NOT NULL, default true) - Flag pentru soft delete.
+- **Relații:**
+  - `user`: `@ManyToOne` (Către `User`, NOT NULL).
+  - `curs`: `@ManyToOne` (Către `Curs`, NOT NULL).
+- **Indecși:** `id_user`, `id_curs`.
+
+### 3.8. MesajChat (`mesaje_chat`)
+- **Scop:** Reține un mesaj individual dintr-o conversație chat.
+- **Câmpuri:**
+  - `id`: `Long` (PK)
+  - `continut`: `String` (NOT NULL, columnDefinition `TEXT`).
+  - `rol`: `RolMesaj` (Enum: `UTILIZATOR`, `ASISTENT`, NOT NULL).
+  - `surseFolosite`: `String` (Nullable, max 1000) - Listă CSV de presigned URLs / referințe de documente folosite în răspuns.
+  - `areRaspuns`: `Boolean` (NOT NULL, default false) - Indică dacă un mesaj al utilizatorului a primit răspuns de la RAG.
+  - `createdAt`: `Instant` (NOT NULL) - Timestamp creare.
+- **Relații:**
+  - `conversatie`: `@ManyToOne` (Către `Conversatie`, NOT NULL).
+- **Indecși:** `id_conversatie`.
+
+---
+
+## 4. Enum-uri de Business
+
+### 4.1. DocumentStatusIndex
+- **Denumiri posibile:** `'PRELUAT'`, `'TRIMIS'`, `'ERONAT'`.
+- **Scop:** Indică starea sincronizării documentului cu serviciul RAG.
+
+### 4.2. RolMesaj
+- **Denumiri posibile:** `'UTILIZATOR'`, `'ASISTENT'`.
+- **Scop:** Indică emițătorul mesajului din chat (`MesajChat`).
+

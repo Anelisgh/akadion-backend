@@ -15,7 +15,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
+import java.util.Map;
 
 // Acest serviciu conține toate regulile de afaceri (business logic) aplicate utilizatorilor de către administrator.
 // Aici se face listarea cererilor, aprobarea, respingerea, dezactivarea și reactivarea conturilor.
@@ -35,6 +39,7 @@ public class AdminUserService {
     private final UserCursRepository userCursRepository;
     private final KeycloakAdminService keycloakAdminService; // Conexiunea cu Keycloak
     private final CursService cursService;
+    private final AuditLogService auditLogService;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
@@ -103,6 +108,14 @@ public class AdminUserService {
         // Decizia KISS: Nu mai facem niciun apel către Keycloak pentru roluri; baza de date este sursa de adevăr!
         user.setStareCont(activ);
         userRepository.save(user);
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                user.getId(),
+                "APROBARE",
+                Map.of("stare", "PENDING"),
+                Map.of("stare", "ACTIV")
+        );
 
         log.info("User acceptat în DB: userId={}, mail={}, rol={}", 
                 userId, user.getMail(), user.getRol() != null ? user.getRol().getDenumire() : "FĂRĂ ROL");
@@ -130,6 +143,14 @@ public class AdminUserService {
         user.setStareCont(respins);
         user.setNrRespingeri((user.getNrRespingeri() != null ? user.getNrRespingeri() : 0) + 1);
         userRepository.save(user);
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                user.getId(),
+                "RESPINGERE",
+                Map.of("stare", "PENDING"),
+                Map.of("stare", "RESPINS", "nrRespingeri", user.getNrRespingeri())
+        );
 
         log.info("Cerere respinsă în DB: userId={}, mail={}, nrRespingeriCurent={}", 
                 userId, user.getMail(), user.getNrRespingeri());
@@ -180,6 +201,14 @@ public class AdminUserService {
                 userCursRepository.dezactiveazaInrolariStudent(userId);
             }
         }
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                savedUser.getId(),
+                "DEZACTIVARE",
+                Map.of("stare", "ACTIV"),
+                Map.of("stare", "INACTIV")
+        );
 
         return savedUser;
     }
@@ -218,6 +247,14 @@ public class AdminUserService {
         if (savedUser.getRol() != null && "STUDENT".equals(savedUser.getRol().getDenumire())) {
             userCursRepository.reactiveazaInrolariStudent(userId);
         }
+        
+        auditLogService.inregistreaza(
+                "app_user",
+                savedUser.getId(),
+                "REACTIVARE",
+                Map.of("stare", "INACTIV"),
+                Map.of("stare", "ACTIV")
+        );
         
         return savedUser;
     }

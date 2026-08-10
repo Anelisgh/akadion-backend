@@ -10,7 +10,9 @@ import com.example.akadion.repository.DocumentRepository;
 import com.example.akadion.repository.SaptamanaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.apache.tika.Tika;
 import org.springframework.web.multipart.MultipartFile;
 import com.example.akadion.exception.DocumentDuplicatException;
@@ -40,6 +42,11 @@ public class DocumentService {
     private final SaptamanaRepository saptamanaRepository;
     private final MinioStorageService minioStorageService;
     private final RagIngestService ragIngestService;
+    private final AuditLogService auditLogService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private DocumentService self;
 
     public List<DocumentResponseDto> listaDocumente(Long saptamanaId, Long callerId, String callerRole) {
         Saptamana saptamana = saptamanaRepository.findWithCursAndProfesorById(saptamanaId)
@@ -100,12 +107,27 @@ public class DocumentService {
         }
 
         boolean succes = ragIngestService.trimiteLaIngest(document, saptamana, curs);
-
-        document.setStatusIndex(succes ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
-        Document savedDocument = documentRepository.save(document);
+        
+        Document savedDocument = self.finalizeazaUploadSiAuditeaza(document.getId(), succes);
 
         log.info("Document adăugat cu succes: docId={}, statusIndex={}", savedDocument.getId(), savedDocument.getStatusIndex());
         return toResponseDto(savedDocument);
+    }
+
+    @Transactional
+    public Document finalizeazaUploadSiAuditeaza(Long documentId, boolean ragSuccess) {
+        Document document = documentRepository.findById(documentId).orElseThrow();
+        document.setStatusIndex(ragSuccess ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
+        Document savedDocument = documentRepository.save(document);
+        
+        auditLogService.inregistreaza(
+                "document",
+                documentId,
+                "UPLOAD",
+                null,
+                Map.of("titlu", savedDocument.getTitlu(), "statusIndex", savedDocument.getStatusIndex().name())
+        );
+        return savedDocument;
     }
 
     public DocumentResponseDto modificaDocument(Long documentId, Long profesorId, String titlu, MultipartFile fisierNou) {
@@ -117,6 +139,8 @@ public class DocumentService {
         if (!curs.getProfesor().getId().equals(profesorId)) {
             throw new AccesInterzisException("Nu aveți permisiunea de a modifica acest document.");
         }
+
+        String vechiulTitlu = document.getTitlu();
 
         if (fisierNou != null) {
             byte[] fileBytes = validateFile(fisierNou);
@@ -155,20 +179,34 @@ public class DocumentService {
             minioStorageService.deleteFile(pathVechi);
 
             boolean succes = ragIngestService.trimiteLaIngest(document, saptamana, curs);
-            document.setStatusIndex(succes ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
-            document = documentRepository.save(document);
+            document = self.finalizeazaModificareSiAuditeaza(document.getId(), succes, vechiulTitlu);
 
         } else if (titlu != null) {
             document.setTitlu(titlu);
             document = documentRepository.save(document);
 
             boolean succes = ragIngestService.trimiteLaIngest(document, saptamana, curs);
-            document.setStatusIndex(succes ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
-            document = documentRepository.save(document);
+            document = self.finalizeazaModificareSiAuditeaza(document.getId(), succes, vechiulTitlu);
         }
 
         log.info("Document modificat cu succes: docId={}, statusIndex={}", document.getId(), document.getStatusIndex());
         return toResponseDto(document);
+    }
+
+    @Transactional
+    public Document finalizeazaModificareSiAuditeaza(Long documentId, boolean ragSuccess, String vechiulTitlu) {
+        Document document = documentRepository.findById(documentId).orElseThrow();
+        document.setStatusIndex(ragSuccess ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
+        Document savedDocument = documentRepository.save(document);
+        
+        auditLogService.inregistreaza(
+                "document",
+                documentId,
+                "INLOCUIRE",
+                Map.of("titlu", vechiulTitlu),
+                Map.of("titlu", savedDocument.getTitlu(), "statusIndex", savedDocument.getStatusIndex().name())
+        );
+        return savedDocument;
     }
 
     public void stergeDocument(Long documentId, Long profesorId) {
@@ -179,15 +217,31 @@ public class DocumentService {
             throw new AccesInterzisException("Nu aveți permisiunea de a șterge acest document.");
         }
 
-        document.setActiv(false);
-        documentRepository.save(document);
+        Document savedDocument = self.finalizeazaStergereSiAuditeaza(documentId);
 
-        if (document.getPathMinio() != null && !document.getPathMinio().isBlank()) {
-            minioStorageService.deleteFile(document.getPathMinio());
+        if (savedDocument.getPathMinio() != null && !savedDocument.getPathMinio().isBlank()) {
+            minioStorageService.deleteFile(savedDocument.getPathMinio());
         }
 
         ragIngestService.stergeDinIngest(documentId);
         log.info("Document șters cu succes: docId={}", documentId);
+    }
+
+    @Transactional
+    public Document finalizeazaStergereSiAuditeaza(Long documentId) {
+        Document document = documentRepository.findById(documentId).orElseThrow();
+        String vechiulTitlu = document.getTitlu();
+        document.setActiv(false);
+        Document savedDocument = documentRepository.save(document);
+        
+        auditLogService.inregistreaza(
+                "document",
+                documentId,
+                "STERGERE",
+                Map.of("activ", true, "titlu", vechiulTitlu),
+                Map.of("activ", false)
+        );
+        return savedDocument;
     }
 
     public DocumentResponseDto reincearcaIngest(Long documentId, Long profesorId) {

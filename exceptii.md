@@ -1,4 +1,4 @@
-﻿# Documentație: Gestiunea Excepțiilor (Pachetul `com.example.akadion.exception`)
+# Documentație: Gestiunea Excepțiilor (Pachetul `com.example.akadion.exception`)
 
 Acest document descrie excepțiile custom, utilizarea lor și mecanismul global de `ControllerAdvice` al aplicației.
 
@@ -37,8 +37,10 @@ Când validările `jakarta.validation` (`@Valid` sau `@NotBlank`, `@Size` de pe 
 | `AccesInterzisException` | `403 Forbidden` | Securitate Business. Utilizatorul e validat ca token, e activ, dar nu este "owner" pe entitate (Nu este profesorul cursului sau documentului, și nici admin). |
 | `ForbiddenOperationException` | `403 Forbidden` | Validări specifice de business blocate. (ex: Duplicate de adresă e-mail detectate, tentativă de cerere a rolului de ADMIN la completare profil). |
 | `UserNotFoundException` | `404 Not Found` | ID inexistent în DB-ul local (de regulă declanșată la preluarea ID-ului din session-ul Keycloak dacă DB locală are contul șters). |
+| `ResursaNegasitaException` | `404 Not Found` | O resursă generică (ex. document, curs etc.) nu a putut fi găsită. |
 | `KeycloakConflictException` | `409 Conflict` | Apelurile API de admin către Keycloak semnalează o duplicare. |
 | `SaptamanaConcurentaException` | `409 Conflict` | Concurrency: Mai mulți useri randează insert pe aceeași săptămână auto-incrementată. |
+| `DocumentDuplicatException` | `409 Conflict` | Un fișier cu același hash SHA-256 a fost deja încărcat în săptămâna respectivă (previne duplicatele bit-by-bit). |
 | `MaxUploadSizeExceededException` | `413 Payload Too Large` | Fișier prea mare pentru MinIO (max configurat în prop = 50MB). |
 | `TooManyRequestsException` | `429 Too Many Requests` | Rate Limiter lovit pe serviciul `StudentCursService` (Asistentul Aky: depășire limita). |
 

@@ -1,4 +1,4 @@
-﻿# Documentație: Servicii (Pachetul `com.example.akadion.service`)
+# Documentație: Servicii (Pachetul `com.example.akadion.service`)
 
 Acest document descrie exhaustiv toate serviciile backend-ului, incluzând responsabilitățile lor, algoritmii importanți, tranzacțiile și edge-cases-urile.
 
@@ -48,7 +48,11 @@ Acest document descrie exhaustiv toate serviciile backend-ului, incluzând respo
 
 ## 5. `KeycloakAdminService`
 - **Scop:** Acționează ca un client HTTP care interacționează cu Admin REST API-ul de la Keycloak.
-- **Responsabilități:** Activează / Dezactivează conturi utilizând ID-ul de Keycloak (`sub`), folosind fluxul OAuth2 Client Credentials configurat global.
+- **Responsabilități:** 
+  - **Dezactivare / Reactivare:** Activează sau dezactivează conturi utilizând ID-ul de Keycloak (`sub`), prin modificarea parametrului `enabled`.
+  - **Actualizare Email:** Schimbă adresa de e-mail în Keycloak folosind endpoint-ul de users (pentru consistența dublei surse de adevăr).
+  - **Acțiuni Email:** Apelează `execute-actions-email` pentru a declanșa trimiterea e-mailurilor native din Keycloak pentru verificarea adresei de mail (`VERIFY_EMAIL`) sau resetarea parolei (`UPDATE_PASSWORD`). 
+- **Tranzacții:** Utilizează un flux OAuth2 Client Credentials configurat global pentru obținerea automată a token-ului de admin `service-account`.
 
 ## 6. `MinioStorageService`
 - **Scop:** Conexiunea raw cu serverul de stocare S3 (MinIO).
@@ -69,13 +73,24 @@ Acest document descrie exhaustiv toate serviciile backend-ului, incluzând respo
   - Ștergerea declanșează `hard delete` complet în cascadă (inclusiv din RAG, MinIO și `PARCURS`).
 
 ## 9. `StudentCursService`
-- **Scop:** Gestionarea înrolării studenților, tracking-ul bifa-rilor per săptămână, și rate limiting pentru chatbot.
+- **Scop:** Gestionarea înrolării studenților, tracking-ul bifărilor per săptămână, interogarea Aky și generarea de Quiz-uri.
 - **Algoritmi importanți:**
   - `inscriereCurs`: Caută dacă există istoric `UserCurs`. Dacă da, face update `activ=true`. Dacă nu, inserție.
-  - `Rate limiting pentru Chat`: Păstrează în memorie (sau folosește DB local) timestamp-urile mesajelor unui student. Permite maxim `MAX_MESSAGES_PER_MINUTE`.
+  - `Rate limiting pentru Chat & Quiz`: Păstrează în memorie (`ConcurrentHashMap<Long, Deque<Instant>>`) timestamp-urile solicitărilor per utilizator. Permite maxim 10 cereri per minut (aruncă `TooManyRequestsException`).
   - `Calcul progres`: `countCompletedSaptamani / totalSaptamani * 100`.
+  - `genereazaQuiz`: Determină `maxSaptamanaParcursa` pentru studentul curent pe un curs, selectează documentele accesibile (cu săptămâni <= `maxSaptamanaParcursa`) și apelează serviciul RAG cu restricționare de context.
 
 ## 10. `UserProfileService`
 - **Scop:** Gestionarea profilului utilizatorului logat și actualizărilor acestuia (nume, email, reset parolă).
 - **Workflow Actualizare Email:** Este un proces de tip "Distributed Saga". Schimbă emailul în Keycloak -> Schimbă emailul în DB locală cu `saveAndFlush`. Dacă apare eroare (ex: violare unique constraint în DB), compensează eroarea punând vechiul email înapoi în Keycloak.
 - **Workflow Reset Parolă:** Apelează `KeycloakAdminService` pentru a executa o acțiune require de `UPDATE_PASSWORD`, trimițând utilizatorului un e-mail direct din Keycloak.
+
+## 11. `ConversatieService`
+- **Scop:** Gestionarea sesiunilor de chat persistent, a istoricului de mesaje și a logicii de retry pentru RAG.
+- **Workflow & Tranzacționare în 3 Pași:**
+  - **Pas 1 (`@Transactional`):** Salvează întrebarea utilizatorului în DB cu `rol = UTILIZATOR` și `areRaspuns = false`. Dacă este prima întrebare din conversație, creează o entitate `Conversatie` nouă cu titlul extras din primele max 40 de caractere.
+  - **Pas 2 (Fără Tranzacție):** Apelează `RagChatService.intreabaAky` pentru a obține răspunsul de la modulul extern RAG FastAPI. Nu ține deschisă o tranzacție DB pe durata apelului HTTP extern.
+  - **Pas 3 (`@Transactional`):** Salvează răspunsul primit de la RAG în DB cu `rol = ASISTENT`, populează `surseFolosite` și marchează pe mesajul inițial al utilizatorului `areRaspuns = true`.
+- **Retry Mechanism (`retryMesaj`):** În cazul în care RAG a dat eroare la pasul 2, mesajul utilizatorului rămâne cu `areRaspuns = false`. Utilizatorul poate apela `retryMesaj` pentru a relua pasul 2 și pasul 3 pentru un mesaj specific, fără a duplica mesajul de întrebare în istoric.
+- **Stergere Soft:** Setează `activ = false` pe conversație (`stergeConversatie`), păstrând istoricul în DB pentru audit.
+

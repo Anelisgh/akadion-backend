@@ -41,11 +41,14 @@ class CompleteProfileServiceTest {
     @Mock
     private StareContRepository stareContRepository;
 
+    @Mock
+    private AuditLogService auditLogService;
+
     private CompleteProfileService completeProfileService;
 
     @BeforeEach
     void setUp() {
-        completeProfileService = new CompleteProfileService(userRepository, rolRepository, stareContRepository);
+        completeProfileService = new CompleteProfileService(userRepository, rolRepository, stareContRepository, auditLogService);
     }
 
     @Test

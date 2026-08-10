@@ -1,4 +1,4 @@
-﻿# Documentație: Reguli de Business (Core Business Rules)
+# Documentație: Reguli de Business (Core Business Rules)
 
 Acest document sumarizează regulile fundamentale de business aplicate în serviciile backend, acoperind gestiunea cursurilor, a săptămânilor, a documentelor, sistemul de aprobare utilizatori și integrarea cu sistemele externe (MinIO, Keycloak, RAG). Ele dictează comportamentul strict al aplicației.
 
@@ -43,11 +43,17 @@ Acest document sumarizează regulile fundamentale de business aplicate în servi
 - **Soft Delete Documente:** Spre deosebire de săptămâni, documentele pot fi "soft deleted" individual (`activ=false`). Rămân în MinIO arhivate. Embeddings-urile din RAG sunt însă șterse automat la soft delete, păstrând asistentul AI necontaminat cu materiale vechi/restrase.
 - **Inlocuirea (Update):** Orice editare care conține un nou fișier face un overwrite: trimite din nou request la RAG spre a rescrie logica din vectori.
 
-## 5. Reguli privind Studenții și Chatbot-ul Aky (`StudentCursService`)
-- **Logica de Inscriere:** Tabela `USER_CURS` are unique-constraint (`studentId, cursId`). Dacă un student revine la un curs abandonat, codul face un "upsert": activează înregistrarea veche punând `activ=true` pentru a repăstra trasabilitatea istorică a progresului.
-- **Bifarea progresului:** Doar un student înscris `activ=true` pe acel curs are permisiunea legală (business wise) să "bifeze" o săptămână (să o treacă finalizată). Orice bifă apare ca row in tabela `PARCURS`.
-- **Limitarea AI (Aky):** Sistemul memorează (in-memory rate limiter `ConcurrentHashMap`) mesajele unui student către Aky pentru a preveni abuzul pe API-ul OpenAI/FastAPI. Limita strictă este setată de aplicație la 10 mesaje per minut.
-- **Securitate Aky:** O întrebare trimisă asistentului pentru un `cursId` e valabilă strict dacă utilizatorul (fie profesor deținător, fie student înrolat) are autorizație la acel material curent.
+## 5. Reguli privind Studenții, Chatbot-ul Aky și Quiz-uri (`StudentCursService`, `ConversatieService`)
+- **Logica de Înscriere:** Tabela `USER_CURS` are unique-constraint (`studentId, cursId`). Dacă un student revine la un curs abandonat, codul face un "upsert": activează înregistrarea veche punând `activ=true` pentru a păstra trasabilitatea istorică a progresului.
+- **Bifarea Progresului:** Doar un student înscris `activ=true` pe acel curs are permisiunea de a bifa o săptămână ca finalizată (adăugare rând în `PARCURS`).
+- **Limitarea AI (Aky & Quiz):** Sistemul folosește un rate-limiter in-memory (`ConcurrentHashMap<Long, Deque<Instant>>`) per utilizator. Limita este de maxim 10 cereri per minut (mesaje RAG sau generări quiz).
+- **Securitate & Bounding Context AI:** O întrebare sau cerere de quiz este permisă doar dacă utilizatorul este înrolat activ (sau este profesorul cursului). Generarea de quiz limitează automat documentele la săptămânile parcurse (`<= maxSaptamanaParcursa`).
+- **Orchestrare Conversații Chat (3 Pași):**
+  1. Salvarea întrebării utilizatorului (`@Transactional`) cu `are_raspuns = false`.
+  2. Apel HTTP extern către RAG (Fără `@Transactional`) pentru a preveni blocarea pool-ului de conexiuni DB.
+  3. Salvarea răspunsului ASISTENT-ului (`@Transactional`) și marcarea `are_raspuns = true`.
+- **Mecanismul de Retry:** Dacă pasul 2 eșuează, mesajul rămâne cu `are_raspuns = false`. Utilizatorul poate reîncerca răspunsul direct pe mesajul existent fără re-crearea întrebării.
+
 
 ## 6. Actualizarea Profilului și a Email-ului (`UserProfileService`)
 - **Tranzacție Distribuită pe Mail:** Deoarece aplicația deține o "dublă-sursă" de email (Keycloak vs DB), modificarea adresei de mail este periculoasă și tratată strict:

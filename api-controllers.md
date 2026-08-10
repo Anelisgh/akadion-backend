@@ -1,4 +1,4 @@
-﻿# Documentație: API Controllers (Pachetul `com.example.akadion.controller`)
+# Documentație: API Controllers (Pachetul `com.example.akadion.controller`)
 
 Acest document descrie exhaustiv structura, endpoint-urile și responsabilitățile controllerelor REST (API) ale aplicației. Acestea reprezintă punctul de intrare (entrypoint) pentru interfața frontend (React).
 
@@ -257,5 +257,55 @@ Acest document descrie exhaustiv structura, endpoint-urile și responsabilităț
 10. `POST /cursuri/{cursId}/chat`
     - **Request:** `AkyChatRequestDto (intrebare, istoricConversatie)`.
     - **Response:** `AkyChatResponseDto (raspuns, surseFolosite)`.
-    - **Business Rules:** Rate limiting - maxim 10 mesaje per minut. Validează validitatea înrolării (student active pe curs). Trimite payload curățat (doar primele N limitate săptămâni pe care studentul s-a dat bifa dacă `StudentCursService` o impune) pentru context.
+    - **Business Rules:** Rate limiting - maxim 10 mesaje per minut. Validează validitatea înrolării (student activ pe curs).
     - **Excepții:** `TooManyRequestsException`.
+
+11. `GET /cursuri/{cursId}/documente-accesibile`
+    - **Scop:** Listează documentele din săptămânile parcurse de student (<= `maxSaptamanaParcursa`).
+    - **Response:** `List<AkySursaDocumentDto (id, titlu, nrSaptamana)>`.
+
+12. `POST /cursuri/{cursId}/quiz/generate`
+    - **Scop:** Generează un test grilă bazat pe documentele accesibile studentului.
+    - **Request DTO:** `QuizGenerateRequestDto (documentIds, numQuestions, diffLevel)`.
+    - **Response:** `List<Map<String, Object>>` (întrebări, opțiuni, răspuns corect).
+
+---
+
+## 8. `ConversatieController`
+- **Path de bază:** `/api`
+- **Securitate:** `@PreAuthorize("hasAnyRole('STUDENT', 'PROFESOR')")`.
+
+### Endpoints:
+1. `GET /conversatii`
+   - **Scop:** Returnează lista paginată a tuturor conversațiilor active ale utilizatorului logat.
+   - **Query Params:** `page` (default 0), `size` (default 20).
+   - **Response:** `ConversatiiPaginateDto (conversatii, paginaCurenta, totalPagini, totalElemente)`.
+
+2. `GET /cursuri/{cursId}/conversatii`
+   - **Scop:** Returnează conversațiile active ale utilizatorului specifice unui curs.
+   - **Query Params:** `page` (default 0), `size` (default 20).
+   - **Response:** `ConversatiiPaginateDto`.
+
+3. `POST /cursuri/{cursId}/conversatii/mesaje`
+   - **Scop:** Creează o nouă conversație pe un curs și trimite prima întrebare către RAG.
+   - **Request DTO:** `NouaIntrebareRequest (intrebare)`. Validare: `@NotBlank`.
+   - **Response:** `RagRaspunsResponse (conversatieId, mesaj)`.
+
+4. `GET /conversatii/{id}/mesaje`
+   - **Scop:** Obține istoricul de mesaje dintr-o conversație specifică.
+   - **Query Params:** `inainteDe` (opțional, cursor ID mesaj), `limit` (default 20).
+   - **Response:** `IstoricMesajeDto (mesaje, areMaiMulte)`.
+
+5. `POST /conversatii/{id}/mesaje`
+   - **Scop:** Adaugă o întrebare nouă într-o conversație existentă și primește răspunsul de la RAG.
+   - **Request DTO:** `NouaIntrebareRequest (intrebare)`.
+   - **Response:** `MesajChatDTO (id, rol, continut, surseFolosite, createdAt, areRaspuns)`.
+
+6. `POST /conversatii/mesaje/{mesajId}/retry`
+   - **Scop:** Reîncearcă obținerea răspunsului RAG pentru un mesaj al utilizatorului care a rămas nesoluționat (`areRaspuns = false`).
+   - **Response:** `MesajChatDTO`.
+
+7. `DELETE /conversatii/{id}`
+   - **Response:** 204 No Content.
+   - **Business Rules:** Soft-delete pe conversație (`activ = false`).
+
