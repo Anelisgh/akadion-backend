@@ -100,13 +100,40 @@ public class StudentController {
     }
 
     @PostMapping("/cursuri/{cursId}/quiz/generate")
-    public List<Map<String, Object>> genereazaQuiz(
+    public QuizGenerateResponseDto genereazaQuiz(
             @PathVariable Long cursId,
             @RequestBody QuizGenerateRequestDto request,
             @AuthenticationPrincipal OidcUser oidcUser) {
         User user = getLoggedUser(oidcUser);
         return studentCursService.genereazaQuiz(user.getId(), cursId, request);
     }
+
+    @PostMapping("/quiz/{incercareId}/finalizeaza")
+    public QuizFinalizatResponseDto finalizeazaQuiz(
+            @PathVariable Long incercareId,
+            @RequestBody FinalizeazaQuizRequestDto request,
+            @AuthenticationPrincipal OidcUser oidcUser) {
+        User user = getLoggedUser(oidcUser);
+        return studentCursService.finalizeazaQuiz(user.getId(), incercareId, request);
+    }
+
+    @GetMapping("/quiz/istoric")
+    public org.springframework.data.domain.Page<IncercareQuizSummaryDto> getIstoricQuiz(
+            @RequestParam(required = false) Long cursId,
+            org.springframework.data.domain.Pageable pageable,
+            @AuthenticationPrincipal OidcUser oidcUser) {
+        User user = getLoggedUser(oidcUser);
+        return studentCursService.getIstoricQuizStudent(user.getId(), cursId, pageable);
+    }
+
+    @GetMapping("/quiz/istoric/{incercareId}")
+    public IncercareQuizDetailDto getDetaliuQuiz(
+            @PathVariable Long incercareId,
+            @AuthenticationPrincipal OidcUser oidcUser) {
+        User user = getLoggedUser(oidcUser);
+        return studentCursService.getDetaliuQuizStudent(user.getId(), incercareId);
+    }
+
 
     @PostMapping("/cursuri/{cursId}/flashcards/generate")
     public List<Map<String, Object>> genereazaFlashcards(

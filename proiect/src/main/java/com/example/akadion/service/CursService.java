@@ -1,24 +1,16 @@
 package com.example.akadion.service;
 
-import com.example.akadion.dto.CursRequestDto;
-import com.example.akadion.dto.CursResponseDto;
-import com.example.akadion.dto.ProfesorDetaliiResponseDto;
-import com.example.akadion.dto.StudentCursDto;
-import com.example.akadion.entity.Curs;
-import com.example.akadion.entity.User;
-import com.example.akadion.entity.UserCurs;
+import com.example.akadion.dto.*;
+import com.example.akadion.entity.*;
 import com.example.akadion.exception.AccesInterzisException;
+import com.example.akadion.exception.ResursaNegasitaException;
 import com.example.akadion.exception.UserNotFoundException;
-import com.example.akadion.repository.CursRepository;
-import com.example.akadion.repository.SaptamanaRepository;
-import com.example.akadion.repository.UserCursRepository;
-import com.example.akadion.repository.UserRepository;
+import com.example.akadion.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +25,8 @@ public class CursService {
     private final UserCursRepository userCursRepository;
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
+    private final IncercareQuizRepository incercareQuizRepository;
+
 
     public List<CursResponseDto> listaCursuriProprii(Long profesorId) {
         return cursRepository.findByProfesorId(profesorId).stream()
@@ -290,4 +284,37 @@ public class CursService {
                 student.getMail()
         );
     }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<AdminQuizNotaDto> getNoteQuizCurs(Long cursId, org.springframework.data.domain.Pageable pageable) {
+        Curs curs = cursRepository.findById(cursId)
+                .orElseThrow(() -> new ResursaNegasitaException("Cursul cu ID-ul " + cursId + " nu a fost găsit."));
+
+        org.springframework.data.domain.Page<IncercareQuiz> page = incercareQuizRepository.findByCursIdAndStatusOrderByCreatedAtDesc(curs.getId(), StatusIncercareQuiz.FINALIZATA, pageable);
+
+        return page.map(incercare -> {
+            User student = incercare.getStudent();
+            int nr = incercare.getNrIntrebari();
+            int scor = incercare.getScor() != null ? incercare.getScor() : 0;
+            double procentaj = nr > 0 ? Math.round(((double) scor / nr) * 10000.0) / 100.0 : 0.0;
+
+            String nume = student != null ? student.getNume() : null;
+            String prenume = student != null ? student.getPrenume() : null;
+            String mail = student != null ? student.getMail() : null;
+            Long studentId = student != null ? student.getId() : null;
+
+            return new AdminQuizNotaDto(
+                    incercare.getId(),
+                    studentId,
+                    nume,
+                    prenume,
+                    mail,
+                    scor,
+                    nr,
+                    procentaj,
+                    incercare.getUpdatedAt() != null ? incercare.getUpdatedAt() : incercare.getCreatedAt()
+            );
+        });
+    }
 }
+

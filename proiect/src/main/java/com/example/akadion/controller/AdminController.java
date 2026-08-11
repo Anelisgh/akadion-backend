@@ -124,4 +124,12 @@ public class AdminController {
             org.springframework.data.domain.Pageable pageable) {
         return auditLogService.getAuditLog(pageable);
     }
+
+    @GetMapping("/cursuri/{cursId}/quiz-note")
+    public org.springframework.data.domain.Page<com.example.akadion.dto.AdminQuizNotaDto> getNoteQuizCurs(
+            @PathVariable Long cursId,
+            org.springframework.data.domain.Pageable pageable) {
+        return cursService.getNoteQuizCurs(cursId, pageable);
+    }
 }
+

@@ -19,7 +19,7 @@ Acest document descrie arhitectura, modificările efectuate, regulile de securit
 [ Serviciul Python RAG (llm-response / FastAPI) ]
              │  (Căutare contexte în Vector DB Qdrant, construire prompt cu Grounding)
              │
-             │ API Call (Gemini 2.5 Flash / JSON Mode)
+             │ API Call (Gemini Flash / JSON Mode)
              ▼
 [ Google Gemini LLM ]
 ```

@@ -2,9 +2,9 @@ package com.example.akadion.service;
 
 import com.example.akadion.dto.*;
 import com.example.akadion.entity.*;
-import com.example.akadion.exception.AccesInterzisException;
-import com.example.akadion.exception.UserNotFoundException;
+import com.example.akadion.exception.*;
 import com.example.akadion.repository.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,10 +30,14 @@ public class StudentCursService {
     private final MinioStorageService minioStorageService;
     private final RagChatService ragChatService;
     private final AuditLogService auditLogService;
+    private final IncercareQuizRepository incercareQuizRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
 
     @Autowired
     @Lazy
     private StudentCursService self;
+
 
     @Transactional
     public void inscriereCurs(Long studentId, Long cursId) {
@@ -344,8 +348,9 @@ public class StudentCursService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
-    public List<Map<String, Object>> genereazaQuiz(Long studentId, Long cursId, QuizGenerateRequestDto request) {
+    @Transactional
+    public QuizGenerateResponseDto genereazaQuiz(Long studentId, Long cursId, QuizGenerateRequestDto request) {
+
         checkRateLimit(studentId);
         int maxSaptamana = determinaSaptamanaParcursaMax(studentId, cursId);
         Long documentId = request != null ? request.documentId() : null;
@@ -355,6 +360,7 @@ public class StudentCursService {
             throw new IllegalArgumentException("Numărul de întrebări trebuie să fie între 1 și 20.");
         }
 
+        Document documentRef = null;
         if (documentId != null) {
             Document document = documentRepository.findWithSaptamanaAndCursAndProfesorById(documentId)
                     .orElseThrow(() -> new IllegalArgumentException("Documentul nu a fost găsit."));
@@ -372,10 +378,243 @@ public class StudentCursService {
             if (nrSaptamana == null || nrSaptamana > maxSaptamana) {
                 throw new AccesInterzisException("Documentul nu este accesibil încă.");
             }
+            documentRef = document;
         }
 
-        return ragChatService.genereazaQuiz(cursId, maxSaptamana, documentId, nrIntrebari);
+        List<Map<String, Object>> rawQuestions = ragChatService.genereazaQuiz(cursId, maxSaptamana, documentId, nrIntrebari);
+        if (rawQuestions == null || rawQuestions.isEmpty()) {
+            throw new RagChatException("Serviciul RAG a returnat o listă vidă de întrebări.");
+        }
+
+        List<Map<String, Object>> indexedQuestions = new java.util.ArrayList<>();
+        List<QuizQuestionProjectionDto> projections = new java.util.ArrayList<>();
+
+        for (int i = 0; i < rawQuestions.size(); i++) {
+            Map<String, Object> raw = new java.util.HashMap<>(rawQuestions.get(i));
+            raw.put("index", i);
+            indexedQuestions.add(raw);
+
+            String intrebare = (String) raw.get("intrebare");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> optiuni = (Map<String, Object>) raw.get("optiuni");
+
+            projections.add(new QuizQuestionProjectionDto(i, intrebare, optiuni));
+        }
+
+        IncercareQuiz incercare = self.salveazaIncercareQuizGenerata(studentId, cursId, documentRef != null ? documentRef.getId() : null, indexedQuestions);
+
+        return new QuizGenerateResponseDto(incercare.getId(), projections);
     }
+
+    @Transactional
+    public IncercareQuiz salveazaIncercareQuizGenerata(Long studentId, Long cursId, Long documentId, List<Map<String, Object>> questions) {
+        User student = userRepository.findById(studentId)
+                .orElseThrow(() -> new UserNotFoundException(studentId));
+        Curs curs = cursRepository.findById(cursId)
+                .orElseThrow(() -> new IllegalArgumentException("Cursul nu a fost găsit."));
+        Document document = documentId != null ? documentRepository.findById(documentId).orElse(null) : null;
+
+        String detaliiJsonStr;
+        try {
+            detaliiJsonStr = objectMapper.writeValueAsString(questions);
+        } catch (Exception e) {
+            log.error("Eroare la serializarea JSON pentru detalii quiz", e);
+            throw new IllegalArgumentException("Format incorect pentru detaliile quiz-ului.", e);
+        }
+
+        IncercareQuiz incercare = IncercareQuiz.builder()
+                .student(student)
+                .curs(curs)
+                .document(document)
+                .status(StatusIncercareQuiz.GENERATA)
+                .nrIntrebari(questions.size())
+                .detaliiJson(detaliiJsonStr)
+                .build();
+
+        return incercareQuizRepository.save(incercare);
+    }
+
+    @Transactional
+    public QuizFinalizatResponseDto finalizeazaQuiz(Long studentId, Long incercareId, FinalizeazaQuizRequestDto request) {
+        IncercareQuiz incercare = incercareQuizRepository.findByIdForUpdate(incercareId)
+                .orElseThrow(() -> new ResursaNegasitaException("Încercarea de quiz nu a fost găsită."));
+
+        if (!incercare.getStudent().getId().equals(studentId)) {
+            throw new AccesInterzisException("Nu aveți acces la această încercare de quiz.");
+        }
+
+        determinaSaptamanaParcursaMax(studentId, incercare.getCurs().getId());
+
+        if (incercare.getStatus() == StatusIncercareQuiz.FINALIZATA) {
+            throw new IncercareQuizFinalizataException("Această încercare de quiz a fost deja finalizată.");
+        }
+
+        List<RaspunsIntrebareDto> raspunsuriTrimise = request != null && request.raspunsuri() != null ? request.raspunsuri() : List.of();
+        int nrIntrebari = incercare.getNrIntrebari();
+
+        if (raspunsuriTrimise.size() != nrIntrebari) {
+            throw new IllegalArgumentException("Trebuie să trimiteți un număr de răspunsuri egal cu numărul de întrebări (" + nrIntrebari + ").");
+        }
+
+        java.util.Set<Integer> indecsiVazuti = new java.util.HashSet<>();
+        Map<Integer, String> mapaRaspunsuri = new java.util.HashMap<>();
+        for (RaspunsIntrebareDto r : raspunsuriTrimise) {
+            if (r.index() == null || r.index() < 0 || r.index() >= nrIntrebari) {
+                throw new IllegalArgumentException("Index invalid de întrebare: " + r.index());
+            }
+            if (!indecsiVazuti.add(r.index())) {
+                throw new IllegalArgumentException("Index duplicat trimis în răspunsuri: " + r.index());
+            }
+            mapaRaspunsuri.put(r.index(), r.raspunsStudent());
+        }
+
+        List<Map<String, Object>> detaliiJsonList;
+        try {
+            detaliiJsonList = objectMapper.readValue(incercare.getDetaliiJson(), new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            log.error("Eroare deserializare JSON la finalizare quiz", e);
+            throw new IllegalStateException("Detaliile quiz-ului din baza de date sunt corupte.", e);
+        }
+
+        int scor = 0;
+        List<QuizQuestionFeedbackDto> detaliiFeedback = new java.util.ArrayList<>();
+
+        for (Map<String, Object> item : detaliiJsonList) {
+            Integer index = (Integer) item.get("index");
+            String intrebare = (String) item.get("intrebare");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> optiuni = (Map<String, Object>) item.get("optiuni");
+            String raspunsCorect = (String) item.get("raspuns_corect");
+            String explicatie = (String) item.get("explicatie");
+
+            String raspunsStudent = mapaRaspunsuri.get(index);
+            boolean esteCorect = raspunsStudent != null && !raspunsStudent.isBlank() && raspunsStudent.trim().equalsIgnoreCase(raspunsCorect != null ? raspunsCorect.trim() : "");
+
+            if (esteCorect) {
+                scor++;
+            }
+
+            item.put("raspuns_student", raspunsStudent);
+            item.put("este_corect", esteCorect);
+
+            detaliiFeedback.add(new QuizQuestionFeedbackDto(
+                    index,
+                    intrebare,
+                    optiuni,
+                    raspunsStudent,
+                    esteCorect,
+                    raspunsCorect,
+                    explicatie
+            ));
+        }
+
+        try {
+            incercare.setDetaliiJson(objectMapper.writeValueAsString(detaliiJsonList));
+        } catch (Exception e) {
+            throw new IllegalStateException("Eroare la serializarea noului JSON de detalii.", e);
+        }
+
+        incercare.setStatus(StatusIncercareQuiz.FINALIZATA);
+        incercare.setScor(scor);
+        incercareQuizRepository.save(incercare);
+
+        double procentaj = nrIntrebari > 0 ? Math.round(((double) scor / nrIntrebari) * 10000.0) / 100.0 : 0.0;
+
+        return new QuizFinalizatResponseDto(
+                incercare.getId(),
+                scor,
+                nrIntrebari,
+                procentaj,
+                detaliiFeedback
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<IncercareQuizSummaryDto> getIstoricQuizStudent(Long studentId, Long cursId, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<IncercareQuiz> page;
+        if (cursId != null) {
+            page = incercareQuizRepository.findByStudentIdAndStatusAndCursIdOrderByCreatedAtDesc(studentId, StatusIncercareQuiz.FINALIZATA, cursId, pageable);
+        } else {
+            page = incercareQuizRepository.findByStudentIdAndStatusOrderByCreatedAtDesc(studentId, StatusIncercareQuiz.FINALIZATA, pageable);
+        }
+
+        return page.map(incercare -> {
+            int nr = incercare.getNrIntrebari();
+            int scor = incercare.getScor() != null ? incercare.getScor() : 0;
+            double procentaj = nr > 0 ? Math.round(((double) scor / nr) * 10000.0) / 100.0 : 0.0;
+            String cursDenumire = incercare.getCurs() != null ? incercare.getCurs().getDenumire() : null;
+            Long docId = incercare.getDocument() != null ? incercare.getDocument().getId() : null;
+            String docTitlu = incercare.getDocument() != null ? incercare.getDocument().getTitlu() : null;
+
+            return new IncercareQuizSummaryDto(
+                    incercare.getId(),
+                    incercare.getCurs().getId(),
+                    cursDenumire,
+                    docId,
+                    docTitlu,
+                    scor,
+                    nr,
+                    procentaj,
+                    incercare.getCreatedAt()
+            );
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public IncercareQuizDetailDto getDetaliuQuizStudent(Long studentId, Long incercareId) {
+        IncercareQuiz incercare = incercareQuizRepository.findById(incercareId)
+                .orElseThrow(() -> new ResursaNegasitaException("Încercarea de quiz nu a fost găsită."));
+
+        if (!incercare.getStudent().getId().equals(studentId)) {
+            throw new AccesInterzisException("Nu aveți acces la această încercare de quiz.");
+        }
+
+        List<QuizQuestionFeedbackDto> detaliiFeedback = new java.util.ArrayList<>();
+        if (incercare.getDetaliiJson() != null) {
+            try {
+                List<Map<String, Object>> list = objectMapper.readValue(incercare.getDetaliiJson(), new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
+                for (Map<String, Object> item : list) {
+                    Integer index = (Integer) item.get("index");
+                    String intrebare = (String) item.get("intrebare");
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> optiuni = (Map<String, Object>) item.get("optiuni");
+                    String raspunsStudent = (String) item.get("raspuns_student");
+                    Boolean esteCorect = (Boolean) item.get("este_corect");
+                    String raspunsCorect = (String) item.get("raspuns_corect");
+                    String explicatie = (String) item.get("explicatie");
+
+                    detaliiFeedback.add(new QuizQuestionFeedbackDto(
+                            index, intrebare, optiuni, raspunsStudent, esteCorect, raspunsCorect, explicatie
+                    ));
+                }
+            } catch (Exception e) {
+                log.error("Eroare la parsarea JSON pentru detaliul quiz-ului", e);
+            }
+        }
+
+        int nr = incercare.getNrIntrebari();
+        int scor = incercare.getScor() != null ? incercare.getScor() : 0;
+        double procentaj = nr > 0 ? Math.round(((double) scor / nr) * 10000.0) / 100.0 : 0.0;
+        String cursDenumire = incercare.getCurs() != null ? incercare.getCurs().getDenumire() : null;
+        Long docId = incercare.getDocument() != null ? incercare.getDocument().getId() : null;
+        String docTitlu = incercare.getDocument() != null ? incercare.getDocument().getTitlu() : null;
+
+        return new IncercareQuizDetailDto(
+                incercare.getId(),
+                incercare.getCurs().getId(),
+                cursDenumire,
+                docId,
+                docTitlu,
+                scor,
+                nr,
+                procentaj,
+                incercare.getStatus(),
+                detaliiFeedback,
+                incercare.getCreatedAt(),
+                incercare.getUpdatedAt()
+        );
+    }
+
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> genereazaFlashcards(Long studentId, Long cursId, FlashcardGenerateRequestDto request) {
