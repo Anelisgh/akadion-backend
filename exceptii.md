@@ -41,6 +41,7 @@ Când validările `jakarta.validation` (`@Valid` sau `@NotBlank`, `@Size` de pe 
 | `KeycloakConflictException` | `409 Conflict` | Apelurile API de admin către Keycloak semnalează o duplicare. |
 | `SaptamanaConcurentaException` | `409 Conflict` | Concurrency: Mai mulți useri randează insert pe aceeași săptămână auto-incrementată. |
 | `DocumentDuplicatException` | `409 Conflict` | Un fișier cu același hash SHA-256 a fost deja încărcat în săptămâna respectivă (previne duplicatele bit-by-bit). |
+| `IncercareQuizFinalizataException` | `409 Conflict` | Un quiz aflat în starea IN_DESFASURARE a fost deja trimis spre finalizare anterior. Previne trimiterea de rezultate multiple pentru același quiz. |
 | `MaxUploadSizeExceededException` | `413 Payload Too Large` | Fișier prea mare pentru MinIO (max configurat în prop = 50MB). |
 | `TooManyRequestsException` | `429 Too Many Requests` | Rate Limiter lovit pe serviciul `StudentCursService` (Asistentul Aky: depășire limita). |
 

@@ -49,7 +49,13 @@ Acest document descrie exhaustiv structura, endpoint-urile și responsabilităț
    - **Scop:** Listează toate cursurile din sistem.
    - **Response:** `List<CursResponseDto (id, denumire, descriere, dataInceput, dataSfarsit, activ, nrSaptamaniCurente, profesorNume, profesorPrenume, nrStudentiInscrisi)>`.
 
-7. `GET /stats`
+7. `GET /audit-log`
+   - **Scop:** Listează jurnalul de evenimente (Audit Log) pentru acțiunile de nivel administrator și modificările importante.
+   - **Query Params:** `page` (default 0), `size` (default 20).
+   - **Response:** `Slice<AuditLogDto>`.
+   - **Interacțiuni:** Apelează `AuditLogService.getAuditLog`.
+
+8. `GET /stats`
    - **Scop:** Returnează statistici pentru dashboard.
    - **Response:** `DashboardStatsDto (cursuriActive, cursuriInactive, utilizatoriActivi, utilizatoriPending)` (cursuriActive, cursuriInactive, utilizatoriActivi, utilizatoriPending).
 
@@ -265,9 +271,29 @@ Acest document descrie exhaustiv structura, endpoint-urile și responsabilităț
     - **Response:** `List<AkySursaDocumentDto (id, titlu, nrSaptamana)>`.
 
 12. `POST /cursuri/{cursId}/quiz/generate`
-    - **Scop:** Generează un test grilă bazat pe documentele accesibile studentului.
-    - **Request DTO:** `QuizGenerateRequestDto (documentIds, numQuestions, diffLevel)`.
-    - **Response:** `List<Map<String, Object>>` (întrebări, opțiuni, răspuns corect).
+    - **Scop:** Generează un test grilă bazat pe documentul specificat (sau toate accesibile). Creează o intrare `IncercareQuiz` în starea `IN_DESFASURARE`.
+    - **Request DTO:** `QuizGenerateRequestDto (documentId, nrIntrebari)`.
+    - **Response:** `QuizGenerateResponseDto (incercareId, intrebari(id, intrebare, optiuni))`.
+
+13. `POST /quiz/{incercareId}/finalizeaza`
+    - **Scop:** Finalizează o încercare curentă și evaluează scorul (notă 1-10).
+    - **Request DTO:** `FinalizeazaQuizRequestDto (raspunsuri(index, raspunsStudent))`.
+    - **Response:** `QuizFinalizatResponseDto (incercareId, scor, procentaj, detalii)`.
+    - **Excepții:** `IncercareQuizFinalizataException` dacă testul a fost deja marcat ca finalizat.
+
+14. `GET /quiz/istoric`
+    - **Scop:** Listează istoricul testelor studentului curent.
+    - **Query Params:** `cursId` (opțional), `page`, `size`.
+    - **Response:** `Page<IncercareQuizSummaryDto>`.
+
+15. `GET /quiz/istoric/{incercareId}`
+    - **Scop:** Obține detaliile complete pentru o încercare de test finalizată.
+    - **Response:** `IncercareQuizDetailDto`.
+
+16. `POST /cursuri/{cursId}/flashcards/generate`
+    - **Scop:** Generează flashcards (Q&A) dintr-un material, apelând direct RAG.
+    - **Request DTO:** `FlashcardGenerateRequestDto (documentId, nrFlashcards)`.
+    - **Response:** `String` (JSON array ca string, parsabil frontend).
 
 ---
 

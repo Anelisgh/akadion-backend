@@ -73,12 +73,14 @@ Acest document descrie exhaustiv toate serviciile backend-ului, incluzând respo
   - Ștergerea declanșează `hard delete` complet în cascadă (inclusiv din RAG, MinIO și `PARCURS`).
 
 ## 9. `StudentCursService`
-- **Scop:** Gestionarea înrolării studenților, tracking-ul bifărilor per săptămână, interogarea Aky și generarea de Quiz-uri.
+- **Scop:** Gestionarea înrolării studenților, tracking-ul bifărilor per săptămână, interogarea Aky, generarea de Quiz-uri și Flashcards.
 - **Algoritmi importanți:**
   - `inscriereCurs`: Caută dacă există istoric `UserCurs`. Dacă da, face update `activ=true`. Dacă nu, inserție.
   - `Rate limiting pentru Chat & Quiz`: Păstrează în memorie (`ConcurrentHashMap<Long, Deque<Instant>>`) timestamp-urile solicitărilor per utilizator. Permite maxim 10 cereri per minut (aruncă `TooManyRequestsException`).
   - `Calcul progres`: `countCompletedSaptamani / totalSaptamani * 100`.
-  - `genereazaQuiz`: Determină `maxSaptamanaParcursa` pentru studentul curent pe un curs, selectează documentele accesibile (cu săptămâni <= `maxSaptamanaParcursa`) și apelează serviciul RAG cu restricționare de context.
+  - `genereazaQuiz`: Apelează microserviciul RAG pentru a obține un quiz bazat pe ID-ul documentului furnizat. Salvează o înregistrare `IncercareQuiz` în starea `IN_DESFASURARE`.
+  - `finalizeazaQuiz`: Primește răspunsurile studentului, le compară iterativ ignorând case-sensitivity, calculează nota și actualizează entitatea `IncercareQuiz` la `FINALIZAT`.
+  - `genereazaFlashcards`: Funcționează similar cu generarea quiz-ului, dar returnează o listă de întrebări/răspunsuri scurte ce urmează să fie folosite pe frontend pentru un memory game.
 
 ## 10. `UserProfileService`
 - **Scop:** Gestionarea profilului utilizatorului logat și actualizărilor acestuia (nume, email, reset parolă).
@@ -90,7 +92,11 @@ Acest document descrie exhaustiv toate serviciile backend-ului, incluzând respo
 - **Workflow & Tranzacționare în 3 Pași:**
   - **Pas 1 (`@Transactional`):** Salvează întrebarea utilizatorului în DB cu `rol = UTILIZATOR` și `areRaspuns = false`. Dacă este prima întrebare din conversație, creează o entitate `Conversatie` nouă cu titlul extras din primele max 40 de caractere.
   - **Pas 2 (Fără Tranzacție):** Apelează `RagChatService.intreabaAky` pentru a obține răspunsul de la modulul extern RAG FastAPI. Nu ține deschisă o tranzacție DB pe durata apelului HTTP extern.
-  - **Pas 3 (`@Transactional`):** Salvează răspunsul primit de la RAG în DB cu `rol = ASISTENT`, populează `surseFolosite` și marchează pe mesajul inițial al utilizatorului `areRaspuns = true`.
+  - **Pas 3 (`@Transactional`):** Salvează răspunsul primit de la RAG. Dacă primește succes, salvează `MesajChat` cu rol asistent. Dacă dă fail sau timeout (aici sau în timpul stream-ului), lasă `are_raspuns = false`, oferind mecanism de `retry` din frontend.
 - **Retry Mechanism (`retryMesaj`):** În cazul în care RAG a dat eroare la pasul 2, mesajul utilizatorului rămâne cu `areRaspuns = false`. Utilizatorul poate apela `retryMesaj` pentru a relua pasul 2 și pasul 3 pentru un mesaj specific, fără a duplica mesajul de întrebare în istoric.
 - **Stergere Soft:** Setează `activ = false` pe conversație (`stergeConversatie`), păstrând istoricul în DB pentru audit.
 
+## 14. `AuditLogService`
+- **Scop:** Interogarea și managementul înregistrărilor de log (Audit).
+- **Rol de Securitate:** Funcțiile sunt destinate accesului cu rol de `ADMIN`.
+- **Workflow:** Exposează metode de căutare / paginare (ex: `getAuditLog(Pageable)`) care sunt direct mapate către `AdminController` pentru a expune fluxul complet către interfața de frontend (Secțiunea Audit Log).

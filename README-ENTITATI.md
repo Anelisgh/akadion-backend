@@ -128,6 +128,30 @@ Reprezintă starea în care se află contul unui utilizator în workflow-ul de a
   - `conversatie`: `@ManyToOne` (Către `Conversatie`, NOT NULL).
 - **Indecși:** `id_conversatie`.
 
+### 3.9. IncercareQuiz (`incercari_quiz`)
+- **Scop:** Stochează istoricul testelor grilă susținute de studenți pe baza materialelor din curs.
+- **Câmpuri:**
+  - `id`: `Long` (PK)
+  - `stare`: `StatusIncercareQuiz` (Enum: `IN_DESFASURARE`, `FINALIZAT`, NOT NULL).
+  - `scor`: `Double` (Nullable) - Nota calculată (1-10).
+  - `procentaj`: `Double` (Nullable) - Procentajul de corectitudine (0-100%).
+  - `detaliiFeedback`: `String` (Nullable, columnDefinition `TEXT`) - JSON salvat conținând structura întrebărilor și a răspunsurilor alese.
+- **Relații:**
+  - `student`: `@ManyToOne` (Către `User`, NOT NULL).
+  - `curs`: `@ManyToOne` (Către `Curs`, NOT NULL).
+- **Indecși:** `id_student`, `id_curs`.
+
+### 3.10. AuditLog (`audit_logs`)
+- **Scop:** Reține istoricul complet al acțiunilor sensibile și administrative de pe platformă.
+- **Câmpuri:**
+  - `id`: `Long` (PK)
+  - `actionType`: `String` (NOT NULL, max 100) - Tipul acțiunii (ex: `USER_ACTIVATED`, `COURSE_DEACTIVATED`).
+  - `entityId`: `String` (Nullable, max 100) - ID-ul entității afectate.
+  - `entityType`: `String` (NOT NULL, max 100) - Tipul entității (ex: `User`, `Curs`).
+  - `details`: `String` (Nullable, columnDefinition `TEXT`) - Detalii adiționale, frecvent în format JSON.
+  - `ipAddress`: `String` (Nullable, max 45) - IP-ul utilizatorului care a executat acțiunea.
+  - *Extinde `BaseAuditableEntity` (include `createdBy` / `createdAt`).*
+
 ---
 
 ## 4. Enum-uri de Business
@@ -140,3 +164,6 @@ Reprezintă starea în care se află contul unui utilizator în workflow-ul de a
 - **Denumiri posibile:** `'UTILIZATOR'`, `'ASISTENT'`.
 - **Scop:** Indică emițătorul mesajului din chat (`MesajChat`).
 
+### 4.3. StatusIncercareQuiz
+- **Denumiri posibile:** `'IN_DESFASURARE'`, `'FINALIZAT'`.
+- **Scop:** Indică stadiul unui quiz inițiat de un student.
