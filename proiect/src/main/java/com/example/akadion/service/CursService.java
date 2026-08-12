@@ -1,11 +1,23 @@
 package com.example.akadion.service;
 
-import com.example.akadion.dto.*;
-import com.example.akadion.entity.*;
+import com.example.akadion.dto.AdminQuizNotaDto;
+import com.example.akadion.dto.CursRequestDto;
+import com.example.akadion.dto.CursResponseDto;
+import com.example.akadion.dto.ProfesorDetaliiResponseDto;
+import com.example.akadion.dto.StudentCursDto;
+import com.example.akadion.entity.Curs;
+import com.example.akadion.entity.IncercareQuiz;
+import com.example.akadion.entity.StatusIncercareQuiz;
+import com.example.akadion.entity.User;
+import com.example.akadion.entity.UserCurs;
 import com.example.akadion.exception.AccesInterzisException;
 import com.example.akadion.exception.ResursaNegasitaException;
 import com.example.akadion.exception.UserNotFoundException;
-import com.example.akadion.repository.*;
+import com.example.akadion.repository.CursRepository;
+import com.example.akadion.repository.IncercareQuizRepository;
+import com.example.akadion.repository.SaptamanaRepository;
+import com.example.akadion.repository.UserCursRepository;
+import com.example.akadion.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,7 +38,6 @@ public class CursService {
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
     private final IncercareQuizRepository incercareQuizRepository;
-
 
     public List<CursResponseDto> listaCursuriProprii(Long profesorId) {
         return cursRepository.findByProfesorId(profesorId).stream()
@@ -109,7 +120,7 @@ public class CursService {
                 .build();
 
         Curs savedCurs = cursRepository.save(curs);
-        
+
         auditLogService.inregistreaza(
                 "curs",
                 savedCurs.getId(),
@@ -117,7 +128,6 @@ public class CursService {
                 null,
                 Map.of("denumire", savedCurs.getDenumire(), "dataInceput", savedCurs.getDataInceput() != null ? savedCurs.getDataInceput().toString() : "")
         );
-        
         log.info("Curs creat: cursId={}, de profesorId={}", savedCurs.getId(), profesorId);
         return toResponseDto(savedCurs);
     }
@@ -153,7 +163,7 @@ public class CursService {
         }
 
         Curs savedCurs = cursRepository.save(curs);
-        
+
         auditLogService.inregistreaza(
                 "curs",
                 savedCurs.getId(),
@@ -161,7 +171,6 @@ public class CursService {
                 Map.of("denumire", oldDenumire, "descriere", oldDescriere, "dataInceput", vecheaDataInceput != null ? vecheaDataInceput.toString() : ""),
                 Map.of("denumire", savedCurs.getDenumire(), "descriere", savedCurs.getDescriere(), "dataInceput", savedCurs.getDataInceput() != null ? savedCurs.getDataInceput().toString() : "")
         );
-        
         log.info("Curs modificat: cursId={}", savedCurs.getId());
         return toResponseDto(savedCurs);
     }
@@ -189,7 +198,7 @@ public class CursService {
                 userCursRepository.save(userCurs);
             }
         }
-        
+
         auditLogService.inregistreaza(
                 "curs",
                 cursId,
@@ -197,7 +206,6 @@ public class CursService {
                 Map.of("activ", true),
                 Map.of("activ", false)
         );
-        
         log.info("Curs dezactivat de profesor: cursId={}", cursId);
     }
 
@@ -216,7 +224,7 @@ public class CursService {
 
         curs.setActiv(true);
         cursRepository.save(curs);
-        
+
         auditLogService.inregistreaza(
                 "curs",
                 cursId,
@@ -224,7 +232,6 @@ public class CursService {
                 Map.of("activ", false),
                 Map.of("activ", true)
         );
-        
         log.info("Curs activat de profesor: cursId={}", cursId);
     }
 
@@ -290,7 +297,11 @@ public class CursService {
         Curs curs = cursRepository.findById(cursId)
                 .orElseThrow(() -> new ResursaNegasitaException("Cursul cu ID-ul " + cursId + " nu a fost găsit."));
 
-        org.springframework.data.domain.Page<IncercareQuiz> page = incercareQuizRepository.findByCursIdAndStatusOrderByCreatedAtDesc(curs.getId(), StatusIncercareQuiz.FINALIZATA, pageable);
+        org.springframework.data.domain.Page<IncercareQuiz> page = incercareQuizRepository.findByCursIdAndStatusOrderByCreatedAtDesc(
+                curs.getId(),
+                StatusIncercareQuiz.FINALIZATA,
+                pageable
+        );
 
         return page.map(incercare -> {
             User student = incercare.getStudent();
@@ -298,17 +309,12 @@ public class CursService {
             int scor = incercare.getScor() != null ? incercare.getScor() : 0;
             double procentaj = nr > 0 ? Math.round(((double) scor / nr) * 10000.0) / 100.0 : 0.0;
 
-            String nume = student != null ? student.getNume() : null;
-            String prenume = student != null ? student.getPrenume() : null;
-            String mail = student != null ? student.getMail() : null;
-            Long studentId = student != null ? student.getId() : null;
-
             return new AdminQuizNotaDto(
                     incercare.getId(),
-                    studentId,
-                    nume,
-                    prenume,
-                    mail,
+                    student != null ? student.getId() : null,
+                    student != null ? student.getNume() : null,
+                    student != null ? student.getPrenume() : null,
+                    student != null ? student.getMail() : null,
                     scor,
                     nr,
                     procentaj,
@@ -317,4 +323,3 @@ public class CursService {
         });
     }
 }
-

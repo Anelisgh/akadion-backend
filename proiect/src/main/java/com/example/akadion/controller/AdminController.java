@@ -1,6 +1,7 @@
 package com.example.akadion.controller;
 
 import com.example.akadion.dto.ActionResponseDto;
+import com.example.akadion.dto.AdminQuizNotaDto;
 import com.example.akadion.dto.CursResponseDto;
 import com.example.akadion.dto.DashboardStatsDto;
 import com.example.akadion.dto.DocumentResponseDto;
@@ -8,7 +9,9 @@ import com.example.akadion.dto.ProfesorDetaliiResponseDto;
 import com.example.akadion.dto.SaptamanaResponseDto;
 import com.example.akadion.dto.StudentCursDto;
 import com.example.akadion.dto.UserPendingDto;
+import com.example.akadion.dto.AuditLogDto;
 import com.example.akadion.service.AdminUserService;
+import com.example.akadion.service.AuditLogService;
 import com.example.akadion.service.CursService;
 import com.example.akadion.service.DocumentService;
 import com.example.akadion.service.SaptamanaService;
@@ -31,7 +34,7 @@ public class AdminController {
     private final CursService cursService;
     private final SaptamanaService saptamanaService;
     private final DocumentService documentService;
-    private final com.example.akadion.service.AuditLogService auditLogService;
+    private final AuditLogService auditLogService;
 
     // 1. Listează utilizatorii din sistem în funcție de starea lor.
     // Apel implicit (doar cei în așteptare): GET /api/admin/users?stare=PENDING
@@ -120,16 +123,15 @@ public class AdminController {
     }
 
     @GetMapping("/audit-log")
-    public org.springframework.data.domain.Slice<com.example.akadion.dto.AuditLogDto> getAuditLog(
+    public org.springframework.data.domain.Slice<AuditLogDto> getAuditLog(
             org.springframework.data.domain.Pageable pageable) {
         return auditLogService.getAuditLog(pageable);
     }
 
     @GetMapping("/cursuri/{cursId}/quiz-note")
-    public org.springframework.data.domain.Page<com.example.akadion.dto.AdminQuizNotaDto> getNoteQuizCurs(
+    public org.springframework.data.domain.Page<AdminQuizNotaDto> getNoteQuizCurs(
             @PathVariable Long cursId,
             org.springframework.data.domain.Pageable pageable) {
         return cursService.getNoteQuizCurs(cursId, pageable);
     }
 }
-

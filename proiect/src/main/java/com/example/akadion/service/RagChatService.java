@@ -110,7 +110,7 @@ public class RagChatService {
         }
     }
 
-    public List<Map<String, Object>> genereazaQuiz(Long cursId, Integer maxSaptamana, Long documentId, Integer nrIntrebari) {
+    public List<Map<String, Object>> genereazaQuiz(Long cursId, Integer maxSaptamana, Long documentId, Integer nrIntrebari, String dificultate) {
         try {
             Map<String, Object> ragPayload = new HashMap<>();
             ragPayload.put("cursId", cursId);
@@ -123,8 +123,11 @@ public class RagChatService {
             if (nrIntrebari != null) {
                 ragPayload.put("nrIntrebari", nrIntrebari);
             }
+            if (dificultate != null) {
+                ragPayload.put("dificultate", dificultate);
+            }
 
-            log.info("Trimitere cerere RAG Quiz pentru cursul {} (maxSaptamana={}, documentId={}, nrIntrebari={}).", cursId, maxSaptamana, documentId, nrIntrebari);
+            log.info("Trimitere cerere RAG Quiz pentru cursul {} (maxSaptamana={}, documentId={}, nrIntrebari={}, dificultate={}).", cursId, maxSaptamana, documentId, nrIntrebari, dificultate);
 
             List<Map<String, Object>> response = restClient.post()
                     .uri("/quiz/generate")
@@ -188,4 +191,3 @@ public class RagChatService {
         }
     }
 }
-

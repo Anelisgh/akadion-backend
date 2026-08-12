@@ -1,10 +1,14 @@
 package com.example.akadion.service;
 
 import com.example.akadion.exception.MinioIntegrationException;
+import io.minio.GetObjectArgs;
+import io.minio.GetObjectResponse;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
+import io.minio.StatObjectArgs;
+import io.minio.StatObjectResponse;
 import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,6 +76,35 @@ public class MinioStorageService {
         }
     }
 
+    public StoredFile getFile(String key) {
+        try {
+            StatObjectResponse stat = minioClient.statObject(StatObjectArgs.builder()
+                    .bucket(bucket)
+                    .object(key)
+                    .build());
+            GetObjectResponse stream = minioClient.getObject(GetObjectArgs.builder()
+                    .bucket(bucket)
+                    .object(key)
+                    .build());
+            return new StoredFile(
+                    stream,
+                    stat.contentType(),
+                    stat.size(),
+                    extractOriginalFilename(key)
+            );
+        } catch (Exception e) {
+            throw new MinioIntegrationException("Eroare la citirea din MinIO pentru " + key, e);
+        }
+    }
+
+    public String extractOriginalFilename(String key) {
+        String filename = key.substring(key.lastIndexOf('/') + 1);
+        if (filename.length() > 37 && filename.charAt(8) == '-' && filename.charAt(13) == '-') {
+            return filename.substring(37);
+        }
+        return filename;
+    }
+
     public String getPresignedPreviewUrl(String key) {
         return getPresignedUrl(key, contentDisposition("inline", key));
     }
@@ -100,10 +133,10 @@ public class MinioStorageService {
     }
 
     private String contentDisposition(String dispositionType, String key) {
-        String filename = key.substring(key.lastIndexOf('/') + 1);
-        if (filename.length() > 37 && filename.charAt(8) == '-' && filename.charAt(13) == '-') {
-            filename = filename.substring(37);
-        }
+        String filename = extractOriginalFilename(key);
         return dispositionType + "; filename=\"" + filename.replace("\"", "_") + "\"";
+    }
+
+    public record StoredFile(InputStream stream, String contentType, long contentLength, String filename) {
     }
 }

@@ -1,10 +1,15 @@
 package com.example.akadion.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.akadion.dto.*;
 import com.example.akadion.entity.*;
-import com.example.akadion.exception.*;
+import com.example.akadion.exception.AccesInterzisException;
+import com.example.akadion.exception.IncercareQuizFinalizataException;
+import com.example.akadion.exception.RagChatException;
+import com.example.akadion.exception.ResursaNegasitaException;
+import com.example.akadion.exception.UserNotFoundException;
 import com.example.akadion.repository.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,9 +17,16 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.UriUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -29,15 +41,12 @@ public class StudentCursService {
     private final DocumentRepository documentRepository;
     private final MinioStorageService minioStorageService;
     private final RagChatService ragChatService;
-    private final AuditLogService auditLogService;
     private final IncercareQuizRepository incercareQuizRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
 
     @Autowired
     @Lazy
     private StudentCursService self;
-
 
     @Transactional
     public void inscriereCurs(Long studentId, Long cursId) {
@@ -60,14 +69,6 @@ public class StudentCursService {
             }
             enrollment.setActiv(true);
             userCursRepository.save(enrollment);
-            
-            auditLogService.inregistreaza(
-                    "user_curs",
-                    enrollment.getId(),
-                    "INSCRIERE",
-                    Map.of("cursId", cursId, "activ", false),
-                    Map.of("cursId", cursId, "activ", true)
-            );
             log.info("Înrolarea studentului {} la cursul {} a fost reactivată.", studentId, cursId);
         } else {
             UserCurs newEnrollment = UserCurs.builder()
@@ -76,14 +77,6 @@ public class StudentCursService {
                     .activ(true)
                     .build();
             userCursRepository.save(newEnrollment);
-            
-            auditLogService.inregistreaza(
-                    "user_curs",
-                    newEnrollment.getId(),
-                    "INSCRIERE",
-                    null,
-                    Map.of("cursId", cursId, "activ", true)
-            );
             log.info("Înrolare nouă creată pentru studentul {} la cursul {}.", studentId, cursId);
         }
     }
@@ -99,14 +92,6 @@ public class StudentCursService {
 
         enrollment.setActiv(false);
         userCursRepository.save(enrollment);
-        
-        auditLogService.inregistreaza(
-                "user_curs",
-                enrollment.getId(),
-                "RETRAGERE",
-                Map.of("cursId", cursId, "activ", true),
-                Map.of("cursId", cursId, "activ", false)
-        );
         log.info("Studentul {} s-a retras de la cursul {}.", studentId, cursId);
     }
 
@@ -241,8 +226,8 @@ public class StudentCursService {
 
         return documentRepository.findBySaptamanaIdAndActivTrue(saptamanaId).stream()
                 .map(doc -> {
-                    String urlVizualizare = minioStorageService.getPresignedPreviewUrl(doc.getPathMinio());
-                    String urlDescarcare = minioStorageService.getPresignedDownloadUrl(doc.getPathMinio());
+                    String urlVizualizare = buildDocumentPreviewUrl(doc);
+                    String urlDescarcare = buildDocumentDownloadUrl(doc);
                     return new DocumentStudentResponseDto(
                             doc.getId(),
                             doc.getTitlu(),
@@ -251,6 +236,26 @@ public class StudentCursService {
                     );
                 })
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Document getAccessibleDocument(Long documentId, Long studentId) {
+        Document document = documentRepository.findWithSaptamanaAndCursAndProfesorById(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Documentul nu a fost găsit."));
+
+        if (!Boolean.TRUE.equals(document.getActiv())) {
+            throw new IllegalArgumentException("Documentul nu a fost găsit.");
+        }
+
+        Long cursId = document.getSaptamana().getCurs().getId();
+        UserCurs enrollment = userCursRepository.findByStudentIdAndCursId(studentId, cursId)
+                .orElseThrow(() -> new AccesInterzisException("Nu aveți acces la acest document."));
+
+        if (!Boolean.TRUE.equals(enrollment.getActiv())) {
+            throw new AccesInterzisException("Nu aveți o înrolare activă la acest curs.");
+        }
+
+        return document;
     }
 
     /**
@@ -277,6 +282,18 @@ public class StudentCursService {
                 profesor.getMail(),
                 profesor.getFacultate()
         );
+    }
+
+    private String buildDocumentPreviewUrl(Document document) {
+        return "/api/documente/%d/preview/%s".formatted(document.getId(), encodedFilename(document));
+    }
+
+    private String buildDocumentDownloadUrl(Document document) {
+        return "/api/documente/%d/download/%s".formatted(document.getId(), encodedFilename(document));
+    }
+
+    private String encodedFilename(Document document) {
+        return UriUtils.encodePathSegment(minioStorageService.extractOriginalFilename(document.getPathMinio()), StandardCharsets.UTF_8);
     }
 
     private final java.util.concurrent.ConcurrentHashMap<Long, List<Long>> rateLimitMap = new java.util.concurrent.ConcurrentHashMap<>();
@@ -350,11 +367,13 @@ public class StudentCursService {
 
     @Transactional
     public QuizGenerateResponseDto genereazaQuiz(Long studentId, Long cursId, QuizGenerateRequestDto request) {
-
         checkRateLimit(studentId);
         int maxSaptamana = determinaSaptamanaParcursaMax(studentId, cursId);
         Long documentId = request != null ? request.documentId() : null;
         Integer nrIntrebari = request != null && request.nrIntrebari() != null ? request.nrIntrebari() : 5;
+        String dificultate = request != null && request.dificultate() != null && !request.dificultate().isBlank()
+                ? request.dificultate().trim()
+                : "MEDIU";
 
         if (nrIntrebari < 1 || nrIntrebari > 20) {
             throw new IllegalArgumentException("Numărul de întrebări trebuie să fie între 1 și 20.");
@@ -378,30 +397,34 @@ public class StudentCursService {
             if (nrSaptamana == null || nrSaptamana > maxSaptamana) {
                 throw new AccesInterzisException("Documentul nu este accesibil încă.");
             }
+
             documentRef = document;
         }
 
-        List<Map<String, Object>> rawQuestions = ragChatService.genereazaQuiz(cursId, maxSaptamana, documentId, nrIntrebari);
+        List<Map<String, Object>> rawQuestions = ragChatService.genereazaQuiz(cursId, maxSaptamana, documentId, nrIntrebari, dificultate);
         if (rawQuestions == null || rawQuestions.isEmpty()) {
             throw new RagChatException("Serviciul RAG a returnat o listă vidă de întrebări.");
         }
 
-        List<Map<String, Object>> indexedQuestions = new java.util.ArrayList<>();
-        List<QuizQuestionProjectionDto> projections = new java.util.ArrayList<>();
+        List<Map<String, Object>> storedQuestions = new ArrayList<>();
+        List<QuizQuestionProjectionDto> projections = new ArrayList<>();
 
         for (int i = 0; i < rawQuestions.size(); i++) {
-            Map<String, Object> raw = new java.util.HashMap<>(rawQuestions.get(i));
-            raw.put("index", i);
-            indexedQuestions.add(raw);
-
-            String intrebare = (String) raw.get("intrebare");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> optiuni = (Map<String, Object>) raw.get("optiuni");
-
-            projections.add(new QuizQuestionProjectionDto(i, intrebare, optiuni));
+            Map<String, Object> sanitizedQuestion = sanitizeQuizQuestion(rawQuestions.get(i), i);
+            storedQuestions.add(sanitizedQuestion);
+            projections.add(new QuizQuestionProjectionDto(
+                    readInteger(sanitizedQuestion.get("index"), i),
+                    readString(sanitizedQuestion.get("intrebare")),
+                    normalizeQuizOptions(sanitizedQuestion.get("optiuni"))
+            ));
         }
 
-        IncercareQuiz incercare = self.salveazaIncercareQuizGenerata(studentId, cursId, documentRef != null ? documentRef.getId() : null, indexedQuestions);
+        IncercareQuiz incercare = self.salveazaIncercareQuizGenerata(
+                studentId,
+                cursId,
+                documentRef != null ? documentRef.getId() : null,
+                storedQuestions
+        );
 
         return new QuizGenerateResponseDto(incercare.getId(), projections);
     }
@@ -414,12 +437,12 @@ public class StudentCursService {
                 .orElseThrow(() -> new IllegalArgumentException("Cursul nu a fost găsit."));
         Document document = documentId != null ? documentRepository.findById(documentId).orElse(null) : null;
 
-        String detaliiJsonStr;
+        String detaliiJson;
         try {
-            detaliiJsonStr = objectMapper.writeValueAsString(questions);
+            detaliiJson = objectMapper.writeValueAsString(questions);
         } catch (Exception e) {
-            log.error("Eroare la serializarea JSON pentru detalii quiz", e);
-            throw new IllegalArgumentException("Format incorect pentru detaliile quiz-ului.", e);
+            log.error("Eroare la serializarea detaliilor pentru încercarea de quiz", e);
+            throw new IllegalStateException("Nu am putut salva detaliile quiz-ului.", e);
         }
 
         IncercareQuiz incercare = IncercareQuiz.builder()
@@ -428,7 +451,7 @@ public class StudentCursService {
                 .document(document)
                 .status(StatusIncercareQuiz.GENERATA)
                 .nrIntrebari(questions.size())
-                .detaliiJson(detaliiJsonStr)
+                .detaliiJson(detaliiJson)
                 .build();
 
         return incercareQuizRepository.save(incercare);
@@ -451,67 +474,66 @@ public class StudentCursService {
 
         List<RaspunsIntrebareDto> raspunsuriTrimise = request != null && request.raspunsuri() != null ? request.raspunsuri() : List.of();
         int nrIntrebari = incercare.getNrIntrebari();
-
         if (raspunsuriTrimise.size() != nrIntrebari) {
             throw new IllegalArgumentException("Trebuie să trimiteți un număr de răspunsuri egal cu numărul de întrebări (" + nrIntrebari + ").");
         }
 
-        java.util.Set<Integer> indecsiVazuti = new java.util.HashSet<>();
-        Map<Integer, String> mapaRaspunsuri = new java.util.HashMap<>();
-        for (RaspunsIntrebareDto r : raspunsuriTrimise) {
-            if (r.index() == null || r.index() < 0 || r.index() >= nrIntrebari) {
-                throw new IllegalArgumentException("Index invalid de întrebare: " + r.index());
+        Set<Integer> indecsiVazuti = new HashSet<>();
+        Map<Integer, String> raspunsuriPeIndex = new HashMap<>();
+        for (RaspunsIntrebareDto raspuns : raspunsuriTrimise) {
+            Integer index = raspuns.index();
+            if (index == null || index < 0 || index >= nrIntrebari) {
+                throw new IllegalArgumentException("Index invalid de întrebare: " + index);
             }
-            if (!indecsiVazuti.add(r.index())) {
-                throw new IllegalArgumentException("Index duplicat trimis în răspunsuri: " + r.index());
+            if (!indecsiVazuti.add(index)) {
+                throw new IllegalArgumentException("Index duplicat trimis în răspunsuri: " + index);
             }
-            mapaRaspunsuri.put(r.index(), r.raspunsStudent());
+            raspunsuriPeIndex.put(index, raspuns.raspunsStudent());
         }
 
-        List<Map<String, Object>> detaliiJsonList;
+        List<Map<String, Object>> detaliiSalvate;
         try {
-            detaliiJsonList = objectMapper.readValue(incercare.getDetaliiJson(), new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
+            detaliiSalvate = objectMapper.readValue(incercare.getDetaliiJson(), new TypeReference<List<Map<String, Object>>>() {});
         } catch (Exception e) {
-            log.error("Eroare deserializare JSON la finalizare quiz", e);
-            throw new IllegalStateException("Detaliile quiz-ului din baza de date sunt corupte.", e);
+            log.error("Eroare la deserializarea detaliilor quiz-ului {}", incercareId, e);
+            throw new IllegalStateException("Detaliile quiz-ului sunt corupte.", e);
         }
 
         int scor = 0;
-        List<QuizQuestionFeedbackDto> detaliiFeedback = new java.util.ArrayList<>();
+        List<QuizQuestionFeedbackDto> feedback = new ArrayList<>();
 
-        for (Map<String, Object> item : detaliiJsonList) {
-            Integer index = (Integer) item.get("index");
-            String intrebare = (String) item.get("intrebare");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> optiuni = (Map<String, Object>) item.get("optiuni");
-            String raspunsCorect = (String) item.get("raspuns_corect");
-            String explicatie = (String) item.get("explicatie");
-
-            String raspunsStudent = mapaRaspunsuri.get(index);
-            boolean esteCorect = raspunsStudent != null && !raspunsStudent.isBlank() && raspunsStudent.trim().equalsIgnoreCase(raspunsCorect != null ? raspunsCorect.trim() : "");
+        for (int i = 0; i < detaliiSalvate.size(); i++) {
+            Map<String, Object> intrebare = detaliiSalvate.get(i);
+            Integer index = readInteger(intrebare.get("index"), i);
+            Map<String, Object> optiuni = normalizeQuizOptions(intrebare.get("optiuni"));
+            String raspunsCorect = readString(intrebare.get("raspuns_corect"));
+            String raspunsStudent = raspunsuriPeIndex.get(index);
+            boolean esteCorect = isQuizAnswerCorrect(raspunsStudent, raspunsCorect, optiuni);
 
             if (esteCorect) {
                 scor++;
             }
 
-            item.put("raspuns_student", raspunsStudent);
-            item.put("este_corect", esteCorect);
+            intrebare.put("index", index);
+            intrebare.put("optiuni", optiuni);
+            intrebare.put("raspuns_student", raspunsStudent);
+            intrebare.put("este_corect", esteCorect);
 
-            detaliiFeedback.add(new QuizQuestionFeedbackDto(
+            feedback.add(new QuizQuestionFeedbackDto(
                     index,
-                    intrebare,
+                    readString(intrebare.get("intrebare")),
                     optiuni,
                     raspunsStudent,
                     esteCorect,
                     raspunsCorect,
-                    explicatie
+                    readString(intrebare.get("explicatie"))
             ));
         }
 
         try {
-            incercare.setDetaliiJson(objectMapper.writeValueAsString(detaliiJsonList));
+            incercare.setDetaliiJson(objectMapper.writeValueAsString(detaliiSalvate));
         } catch (Exception e) {
-            throw new IllegalStateException("Eroare la serializarea noului JSON de detalii.", e);
+            throw new IllegalStateException("Nu am putut salva rezultatul final al quiz-ului.", e);
         }
 
         incercare.setStatus(StatusIncercareQuiz.FINALIZATA);
@@ -525,33 +547,27 @@ public class StudentCursService {
                 scor,
                 nrIntrebari,
                 procentaj,
-                detaliiFeedback
+                feedback
         );
     }
 
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<IncercareQuizSummaryDto> getIstoricQuizStudent(Long studentId, Long cursId, org.springframework.data.domain.Pageable pageable) {
-        org.springframework.data.domain.Page<IncercareQuiz> page;
-        if (cursId != null) {
-            page = incercareQuizRepository.findByStudentIdAndStatusAndCursIdOrderByCreatedAtDesc(studentId, StatusIncercareQuiz.FINALIZATA, cursId, pageable);
-        } else {
-            page = incercareQuizRepository.findByStudentIdAndStatusOrderByCreatedAtDesc(studentId, StatusIncercareQuiz.FINALIZATA, pageable);
-        }
+        org.springframework.data.domain.Page<IncercareQuiz> page = cursId != null
+                ? incercareQuizRepository.findByStudentIdAndStatusAndCursIdOrderByCreatedAtDesc(studentId, StatusIncercareQuiz.FINALIZATA, cursId, pageable)
+                : incercareQuizRepository.findByStudentIdAndStatusOrderByCreatedAtDesc(studentId, StatusIncercareQuiz.FINALIZATA, pageable);
 
         return page.map(incercare -> {
             int nr = incercare.getNrIntrebari();
             int scor = incercare.getScor() != null ? incercare.getScor() : 0;
             double procentaj = nr > 0 ? Math.round(((double) scor / nr) * 10000.0) / 100.0 : 0.0;
-            String cursDenumire = incercare.getCurs() != null ? incercare.getCurs().getDenumire() : null;
-            Long docId = incercare.getDocument() != null ? incercare.getDocument().getId() : null;
-            String docTitlu = incercare.getDocument() != null ? incercare.getDocument().getTitlu() : null;
 
             return new IncercareQuizSummaryDto(
                     incercare.getId(),
                     incercare.getCurs().getId(),
-                    cursDenumire,
-                    docId,
-                    docTitlu,
+                    incercare.getCurs() != null ? incercare.getCurs().getDenumire() : null,
+                    incercare.getDocument() != null ? incercare.getDocument().getId() : null,
+                    incercare.getDocument() != null ? incercare.getDocument().getTitlu() : null,
                     scor,
                     nr,
                     procentaj,
@@ -569,52 +585,58 @@ public class StudentCursService {
             throw new AccesInterzisException("Nu aveți acces la această încercare de quiz.");
         }
 
-        List<QuizQuestionFeedbackDto> detaliiFeedback = new java.util.ArrayList<>();
+        List<QuizQuestionFeedbackDto> feedback = new ArrayList<>();
         if (incercare.getDetaliiJson() != null) {
             try {
-                List<Map<String, Object>> list = objectMapper.readValue(incercare.getDetaliiJson(), new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
-                for (Map<String, Object> item : list) {
-                    Integer index = (Integer) item.get("index");
-                    String intrebare = (String) item.get("intrebare");
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> optiuni = (Map<String, Object>) item.get("optiuni");
-                    String raspunsStudent = (String) item.get("raspuns_student");
-                    Boolean esteCorect = (Boolean) item.get("este_corect");
-                    String raspunsCorect = (String) item.get("raspuns_corect");
-                    String explicatie = (String) item.get("explicatie");
-
-                    detaliiFeedback.add(new QuizQuestionFeedbackDto(
-                            index, intrebare, optiuni, raspunsStudent, esteCorect, raspunsCorect, explicatie
+                List<Map<String, Object>> detalii = objectMapper.readValue(incercare.getDetaliiJson(), new TypeReference<List<Map<String, Object>>>() {});
+                for (int i = 0; i < detalii.size(); i++) {
+                    Map<String, Object> intrebare = detalii.get(i);
+                    feedback.add(new QuizQuestionFeedbackDto(
+                            readInteger(intrebare.get("index"), i),
+                            readString(intrebare.get("intrebare")),
+                            normalizeQuizOptions(intrebare.get("optiuni")),
+                            readString(intrebare.get("raspuns_student")),
+                            readBoolean(intrebare.get("este_corect")),
+                            readString(intrebare.get("raspuns_corect")),
+                            readString(intrebare.get("explicatie"))
                     ));
                 }
             } catch (Exception e) {
-                log.error("Eroare la parsarea JSON pentru detaliul quiz-ului", e);
+                log.error("Eroare la parsarea detaliilor pentru încercarea de quiz {}", incercareId, e);
             }
         }
 
         int nr = incercare.getNrIntrebari();
         int scor = incercare.getScor() != null ? incercare.getScor() : 0;
         double procentaj = nr > 0 ? Math.round(((double) scor / nr) * 10000.0) / 100.0 : 0.0;
-        String cursDenumire = incercare.getCurs() != null ? incercare.getCurs().getDenumire() : null;
-        Long docId = incercare.getDocument() != null ? incercare.getDocument().getId() : null;
-        String docTitlu = incercare.getDocument() != null ? incercare.getDocument().getTitlu() : null;
 
         return new IncercareQuizDetailDto(
                 incercare.getId(),
                 incercare.getCurs().getId(),
-                cursDenumire,
-                docId,
-                docTitlu,
+                incercare.getCurs() != null ? incercare.getCurs().getDenumire() : null,
+                incercare.getDocument() != null ? incercare.getDocument().getId() : null,
+                incercare.getDocument() != null ? incercare.getDocument().getTitlu() : null,
                 scor,
                 nr,
                 procentaj,
                 incercare.getStatus(),
-                detaliiFeedback,
+                feedback,
                 incercare.getCreatedAt(),
                 incercare.getUpdatedAt()
         );
     }
 
+    @Transactional
+    public void stergeIncercareQuiz(Long studentId, Long incercareId) {
+        IncercareQuiz incercare = incercareQuizRepository.findById(incercareId)
+                .orElseThrow(() -> new ResursaNegasitaException("Încercarea de quiz nu a fost găsită."));
+
+        if (!incercare.getStudent().getId().equals(studentId)) {
+            throw new AccesInterzisException("Nu aveți permisiunea de a șterge această încercare de quiz.");
+        }
+
+        incercareQuizRepository.delete(incercare);
+    }
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> genereazaFlashcards(Long studentId, Long cursId, FlashcardGenerateRequestDto request) {
@@ -663,5 +685,100 @@ public class StudentCursService {
         }
 
         return enrollment;
+    }
+
+    private Map<String, Object> sanitizeQuizQuestion(Map<String, Object> rawQuestion, int index) {
+        Map<String, Object> sanitized = new LinkedHashMap<>();
+        sanitized.put("index", index);
+        sanitized.put("intrebare", readString(rawQuestion != null ? rawQuestion.get("intrebare") : null));
+        sanitized.put("optiuni", normalizeQuizOptions(rawQuestion != null ? rawQuestion.get("optiuni") : null));
+        sanitized.put("raspuns_corect", readString(rawQuestion != null ? rawQuestion.get("raspuns_corect") : null));
+        sanitized.put("explicatie", readString(rawQuestion != null ? rawQuestion.get("explicatie") : null));
+        return sanitized;
+    }
+
+    private Map<String, Object> normalizeQuizOptions(Object rawOptions) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+
+        if (rawOptions instanceof Map<?, ?> rawMap) {
+            for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+                normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return normalized;
+        }
+
+        if (rawOptions instanceof List<?> rawList) {
+            for (int i = 0; i < rawList.size(); i++) {
+                normalized.put(String.valueOf((char) ('A' + i)), rawList.get(i));
+            }
+        }
+
+        return normalized;
+    }
+
+    private boolean isQuizAnswerCorrect(String raspunsStudent, String raspunsCorect, Map<String, Object> optiuni) {
+        String studentNormalizat = normalizeQuizValue(raspunsStudent);
+        String corectNormalizat = normalizeQuizValue(raspunsCorect);
+        if (studentNormalizat == null || corectNormalizat == null) {
+            return false;
+        }
+
+        if (studentNormalizat.equals(corectNormalizat)) {
+            return true;
+        }
+
+        Object valoareOptiune = optiuni.get(raspunsStudent);
+        if (valoareOptiune != null && corectNormalizat.equals(normalizeQuizValue(valoareOptiune.toString()))) {
+            return true;
+        }
+
+        for (Map.Entry<String, Object> entry : optiuni.entrySet()) {
+            if (corectNormalizat.equals(normalizeQuizValue(entry.getValue() != null ? entry.getValue().toString() : null))) {
+                return studentNormalizat.equals(normalizeQuizValue(entry.getKey()));
+            }
+        }
+
+        return false;
+    }
+
+    private String normalizeQuizValue(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed.toUpperCase();
+    }
+
+    private String readString(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private Integer readInteger(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+
+        if (value != null) {
+            try {
+                return Integer.parseInt(String.valueOf(value));
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+
+        return fallback;
+    }
+
+    private Boolean readBoolean(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+
+        if (value != null) {
+            return Boolean.parseBoolean(String.valueOf(value));
+        }
+
+        return null;
     }
 }

@@ -46,5 +46,4 @@ public class AuditLog {
     @Column(name = "creat_la", nullable = false, updatable = false)
     @Builder.Default
     private OffsetDateTime creatLa = OffsetDateTime.now();
-
 }

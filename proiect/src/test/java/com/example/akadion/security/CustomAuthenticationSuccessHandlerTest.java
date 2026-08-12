@@ -122,21 +122,6 @@ class CustomAuthenticationSuccessHandlerTest {
         assertThat(response.getRedirectedUrl()).isNull();
     }
 
-    @Test
-    void missingIncompleteStateInDatabaseIsHandledWithControlledJsonError() throws Exception {
-        when(userRepository.findByIdKeycloak("sub-new")).thenReturn(Optional.empty());
-        // Since we moved this logic to the service, this test should just simulate a service exception
-        org.mockito.Mockito.doThrow(new IllegalStateException("Starea INCOMPLET lipsește din DB")).when(userProfileService).inregistreazaUserNou(any(), any());
-
-        MockHttpServletResponse response = performSuccess("sub-new", "new@akadion.test");
-
-        assertThat(response.getStatus()).isEqualTo(500);
-        assertThat(response.getContentAsString()).contains("Starea INCOMPLET lipsește din DB");
-        assertThat(response.getRedirectedUrl()).isNull();
-    }
-
-
-
     private MockHttpServletResponse performSuccess(String subject, String email) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();

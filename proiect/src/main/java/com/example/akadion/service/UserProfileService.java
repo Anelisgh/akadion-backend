@@ -52,7 +52,7 @@ public class UserProfileService {
         user.setNrRespingeri(0);
 
         user = userRepository.save(user);
-        
+
         auditLogService.inregistreaza(
                 "app_user",
                 user.getId(),
@@ -76,16 +76,16 @@ public class UserProfileService {
         user.setFacultate(dto.facultate().trim());
 
         User savedUser = userRepository.save(user);
-        
+
         auditLogService.inregistreaza(
                 "app_user",
                 savedUser.getId(),
                 "EDITARE_PROFIL",
-                Map.of("nume", oldNume == null ? "" : oldNume, 
-                       "prenume", oldPrenume == null ? "" : oldPrenume, 
+                Map.of("nume", oldNume == null ? "" : oldNume,
+                       "prenume", oldPrenume == null ? "" : oldPrenume,
                        "facultate", oldFacultate == null ? "" : oldFacultate),
-                Map.of("nume", savedUser.getNume(), 
-                       "prenume", savedUser.getPrenume(), 
+                Map.of("nume", savedUser.getNume(),
+                       "prenume", savedUser.getPrenume(),
                        "facultate", savedUser.getFacultate())
         );
         log.info("Profil actualizat (local) pentru user-ul cu idKeycloak={}", idKeycloak);

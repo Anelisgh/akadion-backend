@@ -3,8 +3,8 @@ package com.example.akadion.security;
 import com.example.akadion.entity.StareCont;
 import com.example.akadion.entity.User;
 import com.example.akadion.exception.ForbiddenOperationException;
-import com.example.akadion.repository.StareContRepository;
 import com.example.akadion.repository.UserRepository;
+import com.example.akadion.service.UserProfileService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +35,7 @@ public class CustomAuthenticationSuccessHandler implements AuthenticationSuccess
     private static final String INCOMPLETE_STATE = "INCOMPLET";
 
     private final UserRepository userRepository;
-    private final com.example.akadion.service.UserProfileService userProfileService;
+    private final UserProfileService userProfileService;
 
     @Value("${app.frontend.base-url}")
     private String frontendBaseUrl; // Adresa de React (ex: http://localhost:5173)

@@ -114,17 +114,16 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(DocumentDuplicatException.class)
-    @ResponseStatus(HttpStatus.CONFLICT) // Cod HTTP 409
+    @ResponseStatus(HttpStatus.CONFLICT)
     public Map<String, Object> handleDocumentDuplicat(DocumentDuplicatException ex) {
         return Map.of("status", HttpStatus.CONFLICT.value(), "eroare", ex.getMessage());
     }
 
     @ExceptionHandler(IncercareQuizFinalizataException.class)
-    @ResponseStatus(HttpStatus.CONFLICT) // Cod HTTP 409
+    @ResponseStatus(HttpStatus.CONFLICT)
     public Map<String, Object> handleIncercareQuizFinalizata(IncercareQuizFinalizataException ex) {
         return Map.of("status", HttpStatus.CONFLICT.value(), "eroare", ex.getMessage());
     }
-
 
     // 9. Eroare de stocare fișiere / comunicare cu MinIO.
     @ExceptionHandler(MinioIntegrationException.class)

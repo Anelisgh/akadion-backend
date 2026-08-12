@@ -10,6 +10,7 @@ import com.example.akadion.repository.UserRepository;
 import com.example.akadion.security.CustomAuthenticationSuccessHandler;
 import com.example.akadion.security.CustomAuthoritiesMapper;
 import com.example.akadion.service.AdminUserService;
+import com.example.akadion.service.AuditLogService;
 import com.example.akadion.service.CursService;
 import com.example.akadion.service.DocumentService;
 import com.example.akadion.service.SaptamanaService;
@@ -62,6 +63,9 @@ class AuthSecurityWebMvcTest {
 
     @MockitoBean
     private AdminUserService adminUserService;
+
+    @MockitoBean
+    private AuditLogService auditLogService;
 
     @MockitoBean
     private CursService cursService;

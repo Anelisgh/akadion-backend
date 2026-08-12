@@ -134,6 +134,14 @@ public class StudentController {
         return studentCursService.getDetaliuQuizStudent(user.getId(), incercareId);
     }
 
+    @DeleteMapping("/quiz/{incercareId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void stergeIncercareQuiz(
+            @PathVariable Long incercareId,
+            @AuthenticationPrincipal OidcUser oidcUser) {
+        User user = getLoggedUser(oidcUser);
+        studentCursService.stergeIncercareQuiz(user.getId(), incercareId);
+    }
 
     @PostMapping("/cursuri/{cursId}/flashcards/generate")
     public List<Map<String, Object>> genereazaFlashcards(

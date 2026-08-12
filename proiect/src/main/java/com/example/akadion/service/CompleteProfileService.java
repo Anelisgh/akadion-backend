@@ -45,7 +45,7 @@ public class CompleteProfileService {
         updateExistingUser(user, normalizedEmail, dto);
 
         User savedUser = userRepository.save(user);
-        
+
         auditLogService.inregistreaza(
                 "app_user",
                 savedUser.getId(),

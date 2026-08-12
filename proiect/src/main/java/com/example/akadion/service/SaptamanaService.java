@@ -76,7 +76,7 @@ public class SaptamanaService {
 
         cursService.recalculeazaDataSfarsit(curs);
         cursRepository.save(curs);
-        
+
         auditLogService.inregistreaza(
                 "saptamana",
                 saptamana.getId(),
@@ -100,10 +100,10 @@ public class SaptamanaService {
         }
 
         String oldDescriere = saptamana.getDescriere();
-        
+
         saptamana.setDescriere(dto.descriere());
         Saptamana savedSaptamana = saptamanaRepository.save(saptamana);
-        
+
         auditLogService.inregistreaza(
                 "saptamana",
                 saptamanaId,
@@ -111,7 +111,6 @@ public class SaptamanaService {
                 Map.of("descriere", oldDescriere == null ? "" : oldDescriere),
                 Map.of("descriere", savedSaptamana.getDescriere() == null ? "" : savedSaptamana.getDescriere())
         );
-        
         log.info("Săptămână modificată: saptamanaId={}", saptamanaId);
         return toResponseDto(savedSaptamana);
     }
@@ -153,7 +152,7 @@ public class SaptamanaService {
         for (Long docId : idDocumente) {
             ragIngestService.stergeDinIngest(docId);
         }
-        
+
         auditLogService.inregistreaza(
                 "saptamana",
                 saptamanaId,
@@ -161,7 +160,6 @@ public class SaptamanaService {
                 Map.of("nrSaptamana", saptamana.getNrSaptamana(), "descriere", saptamana.getDescriere(), "nrDocumenteAsociate", documente.size()),
                 null
         );
-        
         log.info("Săptămână ștearsă (ultima): saptamanaId={}, nrSaptamana={}, la cursId={}", 
                 saptamanaId, saptamana.getNrSaptamana(), curs.getId());
     }

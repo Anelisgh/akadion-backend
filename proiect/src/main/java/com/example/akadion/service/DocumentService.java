@@ -6,18 +6,19 @@ import com.example.akadion.entity.Document;
 import com.example.akadion.entity.DocumentStatusIndex;
 import com.example.akadion.entity.Saptamana;
 import com.example.akadion.exception.AccesInterzisException;
+import com.example.akadion.exception.DocumentDuplicatException;
 import com.example.akadion.repository.DocumentRepository;
 import com.example.akadion.repository.SaptamanaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import lombok.extern.slf4j.Slf4j;
+import org.apache.tika.Tika;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.apache.tika.Tika;
+import org.springframework.web.util.UriUtils;
 import org.springframework.web.multipart.MultipartFile;
-import com.example.akadion.exception.DocumentDuplicatException;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
@@ -63,6 +64,23 @@ public class DocumentService {
                 .toList();
     }
 
+    public Document getAccessibleDocument(Long documentId, Long callerId, String callerRole) {
+        Document document = documentRepository.findWithSaptamanaAndCursAndProfesorById(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Documentul nu a fost găsit."));
+
+        if (!Boolean.TRUE.equals(document.getActiv())) {
+            throw new IllegalArgumentException("Documentul nu a fost găsit.");
+        }
+
+        if (!"ADMIN".equals(callerRole)) {
+            if (callerId == null || !document.getSaptamana().getCurs().getProfesor().getId().equals(callerId)) {
+                throw new AccesInterzisException("Nu aveți acces la acest document.");
+            }
+        }
+
+        return document;
+    }
+
     public DocumentResponseDto adaugaDocument(Long saptamanaId, Long profesorId, MultipartFile file, String titlu) {
         Saptamana saptamana = saptamanaRepository.findWithCursAndProfesorById(saptamanaId)
                 .orElseThrow(() -> new IllegalArgumentException("Săptămâna nu a fost găsită."));
@@ -95,7 +113,7 @@ public class DocumentService {
         } catch (Exception e) {
             log.error("Eroare la salvarea documentului în DB local. Ștergem fișierul orfan din MinIO.", e);
             minioStorageService.deleteFile(path);
-            
+
             Throwable rootCause = e.getCause();
             if (rootCause instanceof org.hibernate.exception.ConstraintViolationException cve) {
                 log.info("Constraint Name gasit: {}", cve.getConstraintName());
@@ -107,7 +125,6 @@ public class DocumentService {
         }
 
         boolean succes = ragIngestService.trimiteLaIngest(document, saptamana, curs);
-        
         Document savedDocument = self.finalizeazaUploadSiAuditeaza(document.getId(), succes);
 
         log.info("Document adăugat cu succes: docId={}, statusIndex={}", savedDocument.getId(), savedDocument.getStatusIndex());
@@ -119,7 +136,7 @@ public class DocumentService {
         Document document = documentRepository.findById(documentId).orElseThrow();
         document.setStatusIndex(ragSuccess ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
         Document savedDocument = documentRepository.save(document);
-        
+
         auditLogService.inregistreaza(
                 "document",
                 documentId,
@@ -165,7 +182,7 @@ public class DocumentService {
             } catch (Exception e) {
                 log.error("Eroare la salvarea documentului. Ștergem orfanul MinIO.", e);
                 minioStorageService.deleteFile(pathNou);
-                
+
                 Throwable rootCause = e.getCause();
                 if (rootCause instanceof org.hibernate.exception.ConstraintViolationException cve) {
                     log.info("Constraint Name gasit: {}", cve.getConstraintName());
@@ -198,7 +215,7 @@ public class DocumentService {
         Document document = documentRepository.findById(documentId).orElseThrow();
         document.setStatusIndex(ragSuccess ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
         Document savedDocument = documentRepository.save(document);
-        
+
         auditLogService.inregistreaza(
                 "document",
                 documentId,
@@ -233,7 +250,7 @@ public class DocumentService {
         String vechiulTitlu = document.getTitlu();
         document.setActiv(false);
         Document savedDocument = documentRepository.save(document);
-        
+
         auditLogService.inregistreaza(
                 "document",
                 documentId,
@@ -265,7 +282,7 @@ public class DocumentService {
     }
 
     /**
-     * Validarea cu Tika se asigură că extensia fișierului corespunde formatului real 
+     * Validarea cu Tika se asigură că extensia fișierului corespunde formatului real
      * (previne mascarea executabilelor în .pdf etc).
      * NU scanează de malware/viruși.
      */
@@ -274,10 +291,10 @@ public class DocumentService {
             throw new IllegalArgumentException("Fișierul încărcat este gol.");
         }
         String originalName = file.getOriginalFilename();
-        String ext = (originalName != null && originalName.contains(".")) 
-                ? originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase() 
+        String ext = (originalName != null && originalName.contains("."))
+                ? originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase()
                 : "";
-                
+
         Set<String> validMimes = EXPECTED_MIME_TYPES.get(ext);
         if (validMimes == null) {
             throw new IllegalArgumentException("Tip de fișier nepermis. Sunt permise doar: pdf, docx, pptx, zip.");
@@ -306,12 +323,12 @@ public class DocumentService {
             throw new RuntimeException("Eroare la calcularea hash-ului", e);
         }
     }
-    
+
     private String bytesToHex(byte[] hash) {
         StringBuilder hexString = new StringBuilder(2 * hash.length);
-        for (int i = 0; i < hash.length; i++) {
-            String hex = Integer.toHexString(0xff & hash[i]);
-            if(hex.length() == 1) {
+        for (byte currentByte : hash) {
+            String hex = Integer.toHexString(0xff & currentByte);
+            if (hex.length() == 1) {
                 hexString.append('0');
             }
             hexString.append(hex);
@@ -320,8 +337,8 @@ public class DocumentService {
     }
 
     private DocumentResponseDto toResponseDto(Document document) {
-        String urlVizualizare = minioStorageService.getPresignedPreviewUrl(document.getPathMinio());
-        String urlDescarcare = minioStorageService.getPresignedDownloadUrl(document.getPathMinio());
+        String urlVizualizare = buildDocumentPreviewUrl(document);
+        String urlDescarcare = buildDocumentDownloadUrl(document);
         return new DocumentResponseDto(
                 document.getId(),
                 document.getTitlu(),
@@ -330,5 +347,17 @@ public class DocumentService {
                 urlVizualizare,
                 urlDescarcare
         );
+    }
+
+    private String buildDocumentPreviewUrl(Document document) {
+        return "/api/documente/%d/preview/%s".formatted(document.getId(), encodedFilename(document));
+    }
+
+    private String buildDocumentDownloadUrl(Document document) {
+        return "/api/documente/%d/download/%s".formatted(document.getId(), encodedFilename(document));
+    }
+
+    private String encodedFilename(Document document) {
+        return UriUtils.encodePathSegment(minioStorageService.extractOriginalFilename(document.getPathMinio()), StandardCharsets.UTF_8);
     }
 }
