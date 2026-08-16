@@ -84,13 +84,13 @@ Acest document descrie arhitectura, modificările efectuate, regulile de securit
 
 ### A. Backend Monolit (Java / Spring Boot)
 
-1. **`FlashcardGenerateRequestDto.java`** (`backend/proiect/src/main/java/com/example/akadion/akychat/dto/`)
+1. **`FlashcardGenerateRequestDto.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/dto/`)
    - **Ce face**: DTO (Record Java) care încapsulează parametrii: `documentId` (opțional) și `nrFlashcards` (1 - 20).
 
-2. **`StudentAkyController.java`** (`backend/proiect/src/main/java/com/example/akadion/akychat/controller/`) — fostă metodă din `StudentController`, acum clasă separată
+2. **`StudentAkyController.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/controller/`) — fostă metodă din `StudentController`, acum clasă separată
    - **Ce face**: Expune endpoint-ul securizat `@PostMapping("/cursuri/{cursId}/flashcards/generate")` protejat de `@PreAuthorize("hasRole('STUDENT')")`.
 
-3. **`StudentAkyService.java`** (`backend/proiect/src/main/java/com/example/akadion/akychat/service/`) — extras din fostul `StudentCursService` monolit (2026-08-12/13)
+3. **`StudentAkyService.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/service/`) — extras din fostul `StudentCursService` monolit (2026-08-12/13)
    - **Ce face**:
      - `genereazaFlashcards()`: Validează că:
        1. Numărul de fișe este între 1 și 20 (implicit 5).
@@ -98,7 +98,7 @@ Acest document descrie arhitectura, modificările efectuate, regulile de securit
        3. Aplică rate-limiting-ul comun cu chat+quiz (`studentCursService.verificaRateLimitAky`).
    - Deleagă la `StudentCursService.determinaSaptamanaParcursaMax()` (rămas în `curs/service/`) pentru calculul săptămânii maxime parcurse.
 
-4. **`RagChatService.java`** (`backend/proiect/src/main/java/com/example/akadion/akychat/service/`)
+4. **`RagChatService.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/service/`)
    - **Ce face**:
      - `genereazaFlashcards()`: Execută cererea HTTP POST către microserviciul Python RAG.
      - `genereazaQuiz()`: Actualizate null-check-urile pentru payload (`maxSaptamana`, `documentId`, `nrIntrebari`).
