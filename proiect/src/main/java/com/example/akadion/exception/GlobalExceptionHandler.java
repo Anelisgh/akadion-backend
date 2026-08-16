@@ -7,17 +7,26 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-// Clasa aceasta este ca un "spital central" pentru erori.
-// În mod normal, când codul din backend dă o eroare, serverul ar crăpa și ar trimite în browser o pagină urâtă de eroare (cu sute de linii de cod).
-// Folosim @RestControllerAdvice ca să interceptăm orice eroare produsă în controllere și să o transformăm
-// într-un răspuns JSON frumos și curat pe care frontend-ul (React) să îl poată citi și afișa utilizatorului.
+// Punct central de mapare excepție → răspuns HTTP. @RestControllerAdvice interceptează orice
+// excepție aruncată din controllere și o transformă într-un JSON consistent {status, eroare}.
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final String STATUS_KEY = "status";
+    private static final String EROARE_KEY = "eroare";
+
+    // Metodă utilitară privată care construiește un răspuns JSON uniform {status, eroare}.
+    private Map<String, Object> buildError(HttpStatus status, String mesaj) {
+        return Map.of(STATUS_KEY, status.value(), EROARE_KEY, mesaj);
+    }
 
     // 1. Cazul în care datele trimise în formulare nu sunt valide (de exemplu, nume prea scurt sau email incorect).
     // @ExceptionHandler(MethodArgumentNotValidException.class) îi spune lui Spring să ruleze această metodă
@@ -26,59 +35,43 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST) // Răspundem cu codul HTTP 400 (Bad Request)
     public Map<String, Object> handleValidation(MethodArgumentNotValidException ex) {
         Map<String, String> fieldErrors = new LinkedHashMap<>();
-        
+
         // Parcurgem toate câmpurile care au dat eroare și salvăm numele câmpului + mesajul specific.
         for (FieldError error : ex.getBindingResult().getFieldErrors()) {
             fieldErrors.put(error.getField(), error.getDefaultMessage());
         }
-        
+
         // Returnăm un obiect JSON simplu care conține codul de eroare și lista de câmpuri greșite.
         return Map.of(
-                "status", HttpStatus.BAD_REQUEST.value(),
-                "eroare", "Date invalide",
+                STATUS_KEY, HttpStatus.BAD_REQUEST.value(),
+                EROARE_KEY, "Date invalide",
                 "campuri", fieldErrors
         );
-    }
-
-    // 2. Cazul în care un utilizator nu a fost găsit în baza de date.
-    // Interceptează eroarea "UserNotFoundException" și returnează un JSON cu status 404 (Not Found).
-    @ExceptionHandler(UserNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND) // Cod HTTP 404
-    public Map<String, Object> handleUserNotFound(UserNotFoundException ex) {
-        return Map.of("status", HttpStatus.NOT_FOUND.value(), "eroare", ex.getMessage());
     }
 
     @ExceptionHandler(ResursaNegasitaException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public Map<String, Object> handleResursaNegasita(ResursaNegasitaException ex) {
-        return Map.of("status", HttpStatus.NOT_FOUND.value(), "eroare", ex.getMessage());
+        log.warn("Resursă negăsită: {}", ex.getMessage());
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
-    // 3. Cazul în care se încearcă o acțiune nepermisă pe starea contului (ex: dezactivarea unui user deja inactiv).
-    // Interceptează "InvalidUserStateException" și trimite înapoi codul HTTP 400 (Bad Request).
+    // Acțiune administrativă respinsă din cauza stării curente a contului (ex: aprobare user care nu e PENDING).
     @ExceptionHandler(InvalidUserStateException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST) // Cod HTTP 400
     public Map<String, Object> handleInvalidState(InvalidUserStateException ex) {
-        return Map.of("status", HttpStatus.BAD_REQUEST.value(), "eroare", ex.getMessage());
+        log.warn("Stare utilizator invalidă: {}", ex.getMessage());
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(ForbiddenOperationException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public Map<String, Object> handleForbiddenOperation(ForbiddenOperationException ex) {
-        return Map.of("status", HttpStatus.FORBIDDEN.value(), "eroare", ex.getMessage());
+        log.warn("Operațiune interzisă: {}", ex.getMessage());
+        return buildError(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
-    // 4. Cazul în care există un conflict în Keycloak (email-ul există deja).
-    // Interceptează "KeycloakConflictException" și trimite înapoi codul HTTP 409 (Conflict).
-
-    @ExceptionHandler(KeycloakConflictException.class)
-    @ResponseStatus(HttpStatus.CONFLICT) // Cod HTTP 409
-    public Map<String, Object> handleKeycloakConflict(KeycloakConflictException ex) {
-        log.error("Conflict Keycloak: {}", ex.getMessage());
-        return Map.of("status", HttpStatus.CONFLICT.value(), "eroare", ex.getMessage());
-    }
-
-    // 5. Cazul în care conexiunea/comunicarea cu Keycloak a eșuat la nivel de rețea sau server.
+    // Conexiunea/comunicarea cu Keycloak a eșuat la nivel de rețea sau server.
     // Interceptează "KeycloakIntegrationException" și trimite înapoi codul HTTP 502 (Bad Gateway).
     @ExceptionHandler(KeycloakIntegrationException.class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY) // Cod HTTP 502
@@ -86,78 +79,81 @@ public class GlobalExceptionHandler {
         // Înregistrăm eroarea în consolă (loguri) împreună cu toată cauza ei (stack trace) pentru a o putea repara.
         log.error("Eroare integrare Keycloak: {}", ex.getMessage(), ex);
         return Map.of(
-                "status", HttpStatus.BAD_GATEWAY.value(),
-                "eroare", ex.getMessage() != null ? ex.getMessage() : "Eroare de comunicare cu Keycloak.",
+                STATUS_KEY, HttpStatus.BAD_GATEWAY.value(),
+                EROARE_KEY, ex.getMessage() != null ? ex.getMessage() : "Eroare de comunicare cu Keycloak.",
                 "detalii", ex.getMessage() != null ? ex.getMessage() : ""
         );
     }
 
-    // 6. Acces interzis la resursa altui profesor (ownership check eșuat).
-    @ExceptionHandler(AccesInterzisException.class)
-    @ResponseStatus(HttpStatus.FORBIDDEN) // Cod HTTP 403
-    public Map<String, Object> handleAccesInterzis(AccesInterzisException ex) {
-        return Map.of("status", HttpStatus.FORBIDDEN.value(), "eroare", ex.getMessage());
-    }
-
-    // 7. Date sau stări invalide trimise de client (ex: ID inexistent, curs inactiv, deja înrolat).
+    // Date sau stări invalide trimise de client (ex: ID inexistent, curs inactiv, deja înrolat).
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST) // Cod HTTP 400
     public Map<String, Object> handleIllegalArgument(IllegalArgumentException ex) {
-        return Map.of("status", HttpStatus.BAD_REQUEST.value(), "eroare", ex.getMessage());
+        log.warn("Argument ilegal: {}", ex.getMessage());
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    // 8. Conflict de concurență la adăugarea simultană a aceleiași săptămâni.
-    @ExceptionHandler(SaptamanaConcurentaException.class)
-    @ResponseStatus(HttpStatus.CONFLICT) // Cod HTTP 409
-    public Map<String, Object> handleSaptamanaConcurenta(SaptamanaConcurentaException ex) {
-        return Map.of("status", HttpStatus.CONFLICT.value(), "eroare", ex.getMessage());
-    }
-
-    @ExceptionHandler(DocumentDuplicatException.class)
+    // Handler consolidat pentru toate excepțiile de tip conflict (409).
+    // Acoperă: SaptamanaConcurentaException, DocumentDuplicatException, IncercareQuizFinalizataException, EmailDuplicatException.
+    @ExceptionHandler(ResourceConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    public Map<String, Object> handleDocumentDuplicat(DocumentDuplicatException ex) {
-        return Map.of("status", HttpStatus.CONFLICT.value(), "eroare", ex.getMessage());
+    public Map<String, Object> handleResourceConflict(ResourceConflictException ex) {
+        log.warn("Conflict resursă: {}", ex.getMessage());
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
     }
 
-    @ExceptionHandler(IncercareQuizFinalizataException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public Map<String, Object> handleIncercareQuizFinalizata(IncercareQuizFinalizataException ex) {
-        return Map.of("status", HttpStatus.CONFLICT.value(), "eroare", ex.getMessage());
-    }
-
-    // 9. Eroare de stocare fișiere / comunicare cu MinIO.
+    // Eroare de stocare fișiere / comunicare cu MinIO.
     @ExceptionHandler(MinioIntegrationException.class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY) // Cod HTTP 502
     public Map<String, Object> handleMinioIntegration(MinioIntegrationException ex) {
         log.error("Eroare integrare MinIO: {}", ex.getMessage(), ex);
-        return Map.of(
-                "status", HttpStatus.BAD_GATEWAY.value(),
-                "eroare", "Eroare de stocare fișiere. Verificați logurile și reîncercați."
-        );
+        return buildError(HttpStatus.BAD_GATEWAY, "Eroare de stocare fișiere. Verificați logurile și reîncercați.");
     }
 
-    // 10. Fișierul încărcat depășește limita de dimensiune permisă (50MB).
-    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
-    @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE) // Cod HTTP 413
-    public Map<String, Object> handleFileTooLarge(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
-        return Map.of(
-                "status", HttpStatus.PAYLOAD_TOO_LARGE.value(),
-                "eroare", "Fișierul depășește dimensiunea maximă permisă (50MB)."
-        );
+    // Fișierul încărcat depășește limita de dimensiune permisă (50MB).
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.CONTENT_TOO_LARGE) // Cod HTTP 413
+    public Map<String, Object> handleFileTooLarge(MaxUploadSizeExceededException ex) {
+        return buildError(HttpStatus.CONTENT_TOO_LARGE, "Fișierul depășește dimensiunea maximă permisă (50MB).");
     }
 
-    // 11. Depășire limită de apeluri per minut (Rate Limiting).
+    // Depășire limită de apeluri per minut (Rate Limiting).
     @ExceptionHandler(TooManyRequestsException.class)
     @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS) // Cod HTTP 429
     public Map<String, Object> handleTooManyRequests(TooManyRequestsException ex) {
-        return Map.of("status", HttpStatus.TOO_MANY_REQUESTS.value(), "eroare", ex.getMessage());
+        log.warn("Rate limit depășit: {}", ex.getMessage());
+        return buildError(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
     }
 
-    // 12. Eroare de comunicare cu serviciul RAG Chat (Timeout sau service offline).
+    // Eroare de comunicare cu serviciul RAG Chat (Timeout sau service offline).
     @ExceptionHandler(RagChatException.class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY) // Cod HTTP 502
     public Map<String, Object> handleRagChatException(RagChatException ex) {
         log.error("Eroare RAG Chat: {}", ex.getMessage(), ex);
-        return Map.of("status", HttpStatus.BAD_GATEWAY.value(), "eroare", ex.getMessage());
+        return buildError(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    // Spring Security access denied (403) - delegare corectă în loc să fie ascunsă de handler-ul generic 500
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Map<String, Object> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("Acces interzis (Spring Security): {}", ex.getMessage());
+        return buildError(HttpStatus.FORBIDDEN, "Acces interzis.");
+    }
+
+    // Metodă HTTP nepermisă (ex: POST în loc de PATCH)
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public Map<String, Object> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
+        log.warn("Metodă HTTP nepermisă: {}", ex.getMessage());
+        return buildError(HttpStatus.METHOD_NOT_ALLOWED, "Metoda HTTP nu este permisă pentru acest endpoint.");
+    }
+
+    // Handler catch-all: garantează un contract JSON {status, eroare} consistent pentru orice excepție neprevăzută.
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public Map<String, Object> handleUnexpected(Exception ex) {
+        log.error("Eroare neașteptată: {}", ex.getMessage(), ex);
+        return buildError(HttpStatus.INTERNAL_SERVER_ERROR, "A apărut o eroare neașteptată. Vă rugăm să încercați din nou.");
     }
 }

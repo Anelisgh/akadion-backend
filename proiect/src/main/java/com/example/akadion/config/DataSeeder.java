@@ -1,29 +1,35 @@
 package com.example.akadion.config;
 
-import com.example.akadion.entity.Rol;
-import com.example.akadion.entity.StareCont;
-import com.example.akadion.entity.User;
-import com.example.akadion.repository.RolRepository;
-import com.example.akadion.repository.StareContRepository;
-import com.example.akadion.repository.UserRepository;
+import com.example.akadion.common.entity.Rol;
+import com.example.akadion.common.entity.StareCont;
+import com.example.akadion.common.entity.User;
+import com.example.akadion.common.repository.RolRepository;
+import com.example.akadion.common.repository.StareContRepository;
+import com.example.akadion.common.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.example.akadion.common.entity.NumeRol;
+import com.example.akadion.common.entity.NumeStareCont;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
+import java.util.Arrays;
 
-// Acest fișier se ocupă de inserarea datelor de bază (obligatorii) în baza de date la prima pornire a aplicației.
-// Folosim CommandLineRunner pentru a-i spune sistemului Spring: "Rulează acest cod automat imediat după ce ai pornit serverul."
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class DataSeeder implements CommandLineRunner {
 
-    // Injectăm depozitele (Repository-urile) pentru a putea salva date în tabelele corespunzătoare.
     private final RolRepository rolRepository;
     private final StareContRepository stareContRepository;
     private final UserRepository userRepository;
+
+    @Value("${app.seed.admin-email:admin@akadion.com}")
+    private String adminEmail;
+
+    @Value("${app.seed.admin-uuid:5186b9ef-a846-45b6-b640-6ab114fb8dfa}")
+    private String adminUuid;
 
     @Override
     public void run(String... args) {
@@ -33,47 +39,36 @@ public class DataSeeder implements CommandLineRunner {
         seedDefaultAdmin();
     }
 
-    // Această metodă adaugă rolurile fundamentale de utilizatori în baza de date.
     private void seedRoluri() {
-        // Pasul 1: Verificăm dacă tabela de Roluri este complet goală (numărând rândurile: count() == 0).
         if (rolRepository.count() == 0) {
-            // Pasul 2: Dacă e goală, luăm lista de roluri dorită: ADMIN, PROFESOR, STUDENT.
-            List.of("ADMIN", "PROFESOR", "STUDENT").forEach(denumire -> {
+            Arrays.stream(NumeRol.values()).forEach(rolEnum -> {
                 Rol rol = new Rol();
-                rol.setDenumire(denumire); // Setăm numele rolului
-                rolRepository.save(rol);   // Îl salvăm în baza de date (INSERT)
+                rol.setDenumire(rolEnum.name());
+                rolRepository.save(rol);
             });
             log.info("S-au inserat {} roluri de bază în DB.", rolRepository.count());
         } else {
-            // Pasul 3: Dacă tabela are deja date, nu mai adăugăm nimic ca să nu le duplicăm.
             log.info("Rolurile sunt deja în baza de date, se sare peste inserare.");
         }
     }
 
-    // Această metodă adaugă stările posibile în care se poate afla un cont.
     private void seedStariCont() {
-        // Pasul 1: Verificăm dacă tabela de Stări Cont este goală.
         if (stareContRepository.count() == 0) {
-            // Pasul 2: Dacă e goală, inserăm stările necesare fluxului nostru de aprobări.
-            List.of("INCOMPLET", "PENDING", "ACTIV", "INACTIV", "RESPINS").forEach(denumire -> {
+            Arrays.stream(NumeStareCont.values()).forEach(stareEnum -> {
                 StareCont stareCont = new StareCont();
-                stareCont.setDenumire(denumire); // Setăm denumirea stării
-                stareContRepository.save(stareCont); // O salvăm în DB (INSERT)
+                stareCont.setDenumire(stareEnum.name());
+                stareContRepository.save(stareCont);
             });
             log.info("S-au inserat {} stări de cont în DB.", stareContRepository.count());
         } else {
-            // Pasul 3: Dacă existau deja stări salvate anterior, se sare peste pas.
             log.info("Stările de cont sunt deja populate în DB, se sare peste.");
         }
     }
 
-    // Această metodă adaugă contul de administrator implicit cu profil complet (stare ACTIV)
-    // astfel încât colegii care rulează aplicația local să nu fie redirecționați la completare profil.
     private void seedDefaultAdmin() {
-        String adminEmail = "admin@akadion.com";
         if (userRepository.findByMail(adminEmail).isEmpty()) {
-            Rol adminRol = rolRepository.findByDenumire("ADMIN").orElse(null);
-            StareCont activStare = stareContRepository.findByDenumire("ACTIV").orElse(null);
+            Rol adminRol = rolRepository.findByDenumire(NumeRol.ADMIN.name()).orElse(null);
+            StareCont activStare = stareContRepository.findByDenumire(NumeStareCont.ACTIV.name()).orElse(null);
 
             if (adminRol == null || activStare == null) {
                 log.warn("Nu s-a putut insera admin-ul implicit: rolul ADMIN sau starea ACTIV nu au fost găsite în DB.");
@@ -81,7 +76,7 @@ public class DataSeeder implements CommandLineRunner {
             }
 
             User user = User.builder()
-                    .idKeycloak("5186b9ef-a846-45b6-b640-6ab114fb8dfa") // (potrivit cu cel din keycloak-import)
+                    .idKeycloak(adminUuid)
                     .mail(adminEmail)
                     .nume("Admin")
                     .prenume("Principal")

@@ -4,13 +4,11 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 
 import java.io.IOException;
 
+import com.example.akadion.auth.security.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -26,6 +24,7 @@ public class AccessLogFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger("access");
 
     @Override
+    @SuppressWarnings("java:S3457") // kv(...) sunt argumente structurate (logstash), nu placeholder-e {} de substituție
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
@@ -39,18 +38,7 @@ public class AccessLogFilter extends OncePerRequestFilter {
                     kv("path", request.getRequestURI()),
                     kv("status", response.getStatus()),
                     kv("duration_ms", Math.round(durationMs * 10) / 10.0),
-                    kv("user", currentUser()));
+                    kv("user", SecurityUtils.currentUser()));
         }
-    }
-
-    private String currentUser() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getName())) {
-            return "anonymous";
-        }
-        if (auth.getPrincipal() instanceof OidcUser oidc && oidc.getEmail() != null) {
-            return oidc.getEmail();
-        }
-        return auth.getName();
     }
 }
