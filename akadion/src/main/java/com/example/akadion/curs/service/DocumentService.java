@@ -10,6 +10,7 @@ import com.example.akadion.curs.entity.Document;
 import com.example.akadion.curs.entity.DocumentStatusIndex;
 import com.example.akadion.curs.entity.Saptamana;
 import com.example.akadion.exception.DocumentDuplicatException;
+import com.example.akadion.exception.ResursaNegasitaException;
 import com.example.akadion.curs.repository.DocumentRepository;
 import com.example.akadion.curs.repository.SaptamanaRepository;
 import lombok.RequiredArgsConstructor;
@@ -127,7 +128,7 @@ public class DocumentService {
     @Transactional
     public Document finalizeazaUploadSiAuditeaza(Long documentId, boolean ragSuccess) {
         Document document = documentRepository.findById(documentId).orElseThrow();
-        document.setStatusIndex(ragSuccess ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
+        document.setStatusIndex(ragSuccess ? DocumentStatusIndex.INDEXED_TEXT_ONLY : DocumentStatusIndex.ERONAT);
         Document savedDocument = documentRepository.save(document);
 
         auditLogService.inregistreaza(
@@ -191,7 +192,11 @@ public class DocumentService {
     @Transactional
     public Document finalizeazaModificareSiAuditeaza(Long documentId, boolean ragSuccess, String vechiulTitlu) {
         Document document = documentRepository.findById(documentId).orElseThrow();
-        document.setStatusIndex(ragSuccess ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
+        document.setStatusIndex(ragSuccess ? DocumentStatusIndex.INDEXED_TEXT_ONLY : DocumentStatusIndex.ERONAT);
+        // Job-ul de imagini repornește de la zero; numărătorile vechi nu mai sunt valabile
+        // până la următorul callback.
+        document.setImaginiIndexate(null);
+        document.setImaginiEsuate(null);
         Document savedDocument = documentRepository.save(document);
 
         auditLogService.inregistreaza(
@@ -243,16 +248,42 @@ public class DocumentService {
 
         cursOwnershipValidator.verificaProprietar(document.getSaptamana().getCurs(), profesorId, "Nu aveți permisiunea de a reîncerca indexarea pentru acest document.");
 
-        if (document.getStatusIndex() == DocumentStatusIndex.TRIMIS) {
+        // TRIMIS = documente vechi, indexate complet inainte de pipeline-ul de imagini.
+        // INDEXED = text + imagini deja indexate cu succes. Restul starilor (inclusiv
+        // INDEXED_TEXT_ONLY, ramas asa daca job-ul de imagini a esuat sau callback-ul
+        // nu a ajuns) pot fi reincercate.
+        if (document.getStatusIndex() == DocumentStatusIndex.TRIMIS || document.getStatusIndex() == DocumentStatusIndex.INDEXED) {
             throw new IllegalArgumentException("Documentul este deja indexat cu succes.");
         }
 
         boolean succes = ragIngestService.trimiteLaIngest(document, document.getSaptamana(), document.getSaptamana().getCurs());
-        document.setStatusIndex(succes ? DocumentStatusIndex.TRIMIS : DocumentStatusIndex.ERONAT);
+        document.setStatusIndex(succes ? DocumentStatusIndex.INDEXED_TEXT_ONLY : DocumentStatusIndex.ERONAT);
+        document.setImaginiIndexate(null);
+        document.setImaginiEsuate(null);
         Document savedDocument = documentRepository.save(document);
 
         log.info("Reîncercare indexare finalizată: docId={}, statusIndex={}", savedDocument.getId(), savedDocument.getStatusIndex());
         return toResponseDto(savedDocument);
+    }
+
+    /**
+     * Primeste callback-ul async de la embedder_service la finalul job-ului de
+     * procesare a imaginilor (PATCH /api/rag/documents/image-status). Idempotenta:
+     * embedder-ul poate trimite acelasi payload de pana la 3 ori (retry la nivel de
+     * retea) - reaplicarea acelorasi valori e sigura.
+     */
+    @Transactional
+    public void actualizeazaStatusImagini(Long documentId, DocumentStatusIndex statusImagini, int imaginiIndexate, int imaginiEsuate) {
+        Document document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new ResursaNegasitaException(ERR_DOCUMENT_NOT_FOUND));
+
+        document.setStatusIndex(statusImagini);
+        document.setImaginiIndexate(imaginiIndexate);
+        document.setImaginiEsuate(imaginiEsuate);
+        documentRepository.save(document);
+
+        log.info("Status imagini actualizat din callback embedder: docId={}, statusIndex={}, imaginiIndexate={}, imaginiEsuate={}",
+                documentId, statusImagini, imaginiIndexate, imaginiEsuate);
     }
 
     /**

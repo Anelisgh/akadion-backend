@@ -37,6 +37,12 @@ public class Document extends BaseAuditableEntity {
     @Column(name = "hash_continut", length = 64)
     private String hashContinut;
 
+    @Column(name = "imagini_indexate")
+    private Integer imaginiIndexate;
+
+    @Column(name = "imagini_esuate")
+    private Integer imaginiEsuate;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean activ = true;

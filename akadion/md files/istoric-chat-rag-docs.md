@@ -63,7 +63,7 @@ Trimiterea unei întrebări noi (`POST /api/conversatii/{id}/mesaje`) e împăr�
 
 ### Protecția de Retry și `are_raspuns`
 
-Pentru a gestiona corect situațiile în care RAG-ul eșuează (HTTP 502, timeout) fără a polua UI-ul și fără a pierde întrebarea utilizatorului, am introdus coloana `are_raspuns` în tabelul `mesaje_chat`:
+Coloana `are_raspuns` din tabelul `mesaje_chat` există special pentru a gestiona corect situațiile în care RAG-ul eșuează (HTTP 502, timeout), fără a polua UI-ul și fără a pierde întrebarea utilizatorului:
 
 1. **La salvarea inițială (Pasul 1)**: Când un `UTILIZATOR` trimite un mesaj, acesta este salvat cu `are_raspuns = false`.
 2. **Dacă Pasul 2 (RAG) eșuează**: Tranzacția inițială a fost deja finalizată. Mesajul rămâne în baza de date cu `are_raspuns = false`. Frontend-ul știe acum în mod explicit că acest mesaj nu a primit un răspuns din cauza unei erori tehnice (și poate afișa un ⚠️).
@@ -81,5 +81,8 @@ Această arhitectură elimină ambiguitatea din baza de date și oferă o metod�
 
 ---
 
-### 3. Modificări de Contract
-Limitarea chatbot-ului strict la studenți a fost ridicată — parametrul Java din `RagChatService.intreabaAky` se numește acum `userId` (poate fi student sau profesor). **Cheia JSON trimisă efectiv către RAG a rămas totuși `"studentId"`** (nu a fost redenumită în payload, doar parametrul din cod) — vezi `contract-rag.md` pentru payload-ul exact. De la 2026-08-12/13, payload-ul include și `maxSaptamanaParcursa` (calculat real pentru chat-ul studentului, implicit `100` pentru chat-ul profesorului/persistat — vezi `services.md` §9.3).
+### 3. Chatbot-ul e comun studenților și profesorilor — o singură nuanță de nume
+
+Chatbot-ul poate fi interogat atât de studenți, cât și de profesori — parametrul Java din `RagChatService.intreabaAky` se numește `userId` tocmai pentru că poate fi ID-ul oricăruia dintre cei doi. **Cheia JSON trimisă efectiv către RAG rămâne totuși `"studentId"`** — o denumire moștenită din payload, care nu reflectă exact semantica parametrului Java; nu confunda una cu cealaltă. Vezi `contract-rag.md` pentru payload-ul exact.
+
+Payload-ul include și `maxSaptamanaParcursa`: calculat real pentru chat-ul rapid al studentului (limitează AI-ul la materia deja parcursă, vezi `services.md` §9.1 și §9.3), dar trimis implicit ca `100` pentru chat-ul profesorului și pentru chat-ul persistat (`ConversatieService`, folosit de ambele roluri) — practic fără limitare de progres în aceste două cazuri. Motivația completă a acestei diferențe: `fluxuri/06-chat-aky-si-conversatii.md`.

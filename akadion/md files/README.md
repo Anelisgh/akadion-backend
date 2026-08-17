@@ -5,6 +5,9 @@ Acest repository conține backend-ul aplicației **Akadion** (Spring Boot 3.x / 
 > [!NOTE]
 > Frontend-ul React (Vite) este gestionat separat. Acest ghid documentează exclusiv structura, setup-ul local și interfețele expuse de backend.
 
+> [!TIP]
+> **Cauți "ce se întâmplă, cum și de ce" pentru un flux anume (login, aprobare cont, upload document, quiz, chat AI etc.)?** Documentele din acest fișier și din `services.md`/`api-controllers.md`/etc. sunt organizate **pe strat tehnic** (control, servicii, entități). Pentru o poveste completă, narativă, pe fiecare flux de business — de la declanșator până la efectul final în baza de date — vezi **[`fluxuri/00-INDEX.md`](fluxuri/00-INDEX.md)**.
+
 ---
 
 ## 🛠️ Setup Local pentru Evaluare
@@ -86,10 +89,10 @@ mvn spring-boot:run -Dspring-boot.run.profiles=demo
 2. **Prima Autentificare**: Keycloak redirecționează către callback-ul backend-ului.
    - Backend detectează că nu există o înregistrare în DB locală cu acel `id_keycloak` (`sub`).
    - Inserează un rând schelet în tabela `app_user` cu `id_keycloak`, `mail`, `stare_cont = INCOMPLET`, restul câmpurilor `NULL`.
-   - Redirecționează utilizatorul la `{frontend}/complete-profile`.
+   - Redirecționează utilizatorul la `{frontend}/` — un singur URL fix, indiferent de starea contului. Frontend-ul citește `stareCont` din `GET /api/auth/me` și decide singur pagina exactă (`/complete-profile`, `/asteptare-aprobare` etc.) — detalii: `auth_backend_keycloak.md` §1 și `fluxuri/01-autentificare-si-onboarding.md`.
 3. **Completare Profil**: Utilizatorul introduce Numele, Prenumele, Facultatea și Rolul dorit (STUDENT / PROFESOR) via `POST /api/auth/complete-profile`.
    - Backend actualizează datele în DB și setează starea contului pe `PENDING`.
-   - Redirecționează utilizatorul la `{frontend}/asteptare-aprobare`.
+   - Frontend-ul redirecționează la `/asteptare-aprobare` pe baza noii stări citite din `/api/auth/me`.
 4. **Aprobare Admin**:
    - Adminul vizualizează cererile (`GET /api/admin/users?stare=PENDING`).
    - Adminul acceptă (`PATCH /api/admin/users/{id}/approve`) -> starea devine `ACTIV` în DB. Rolul este deja stocat în DB. Keycloak nu se atinge.

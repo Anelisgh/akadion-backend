@@ -1,6 +1,5 @@
 package com.example.akadion.auth.security;
 
-import com.example.akadion.common.entity.NumeStareCont;
 import com.example.akadion.common.entity.User;
 import com.example.akadion.exception.ForbiddenOperationException;
 import com.example.akadion.common.repository.UserRepository;
@@ -23,9 +22,10 @@ import java.util.Optional;
 
 /**
  * Gestionează redirecționarea după autentificarea cu succes (login sau register).
- * Dacă utilizatorul nu are încă un rând în tabela app_user, îl redirecționează către pagina
- * de completare a profilului din frontend, unde va fi creat profilul local.
- * Altfel, redirecționează utilizatorul la pagina potrivită în funcție de starea contului său.
+ * Dacă utilizatorul nu are încă un rând în tabela app_user, îl creează local (stare inițială INCOMPLET).
+ * În ambele cazuri redirecționează la rădăcina frontend-ului — frontend-ul decide singur pe ce
+ * pagină ajunge userul, citind stareCont din GET /api/auth/me (vezi App.jsx: routeByState +
+ * RequireAuthenticatedState). Backend-ul nu mai trebuie să cunoască structura de rute a frontend-ului.
  */
 @Slf4j
 @Component
@@ -59,33 +59,20 @@ public class CustomAuthenticationSuccessHandler implements AuthenticationSuccess
             // Pasul 3: Căutăm în baza noastră de date locală dacă acest utilizator are deja un cont înregistrat la noi.
             Optional<User> userOpt = userRepository.findByIdKeycloak(sub);
 
-            String redirectUrl;
-
             // Cazul A: Utilizatorul NU există în baza noastră de date (este prima dată când se loghează după ce s-a înregistrat pe Keycloak).
             if (userOpt.isEmpty()) {
                 userProfileService.inregistreazaUserNou(sub, email);
-                redirectUrl = frontendBaseUrl + "/complete-profile";
+                log.info("Cont nou creat local pentru sub={}, stare inițială INCOMPLET.", sub);
             }
             // Cazul B: Utilizatorul există deja în DB (s-a mai logat în trecut).
             else {
-                User user = userOpt.get();
-                String stare = user.getStareCont().getDenumire(); // Citim starea lui curentă din DB
-                log.info("User sub={} logat cu succes. Stare cont curentă: {}", sub, stare);
-
-                // Îl redirecționăm pe pagina specifică stării sale.
-                NumeStareCont stareEnum = parseStareCont(stare);
-                switch (stareEnum) {
-                    case INCOMPLET -> redirectUrl = frontendBaseUrl + "/complete-profile"; // Încă nu a completat profilul
-                    case PENDING -> redirectUrl = frontendBaseUrl + "/asteptare-aprobare";   // Așteaptă aprobarea adminului
-                    case RESPINS -> redirectUrl = frontendBaseUrl + "/cerere-respinsa";     // Cererea a fost respinsă de admin
-                    case INACTIV -> redirectUrl = frontendBaseUrl + "/cont-dezactivat";     // Contul a fost blocat/dezactivat
-                    case ACTIV -> redirectUrl = frontendBaseUrl + "/";                       // Cont activ - începe din Home
-                    case null, default -> redirectUrl = frontendBaseUrl + "/";
-                }
+                log.info("User sub={} logat cu succes. Stare cont curentă: {}", sub, userOpt.get().getStareCont().getDenumire());
             }
 
-            // Pasul 4: Executăm redirecționarea efectivă a browserului către URL-ul ales de mai sus.
-            response.sendRedirect(redirectUrl);
+            // Pasul 4: Redirecționăm întotdeauna la rădăcina frontend-ului. Ruta exactă (complete-profile,
+            // asteptare-aprobare, cerere-respinsa, cont-dezactivat sau home) e decisă de frontend, pe baza
+            // stareCont-ului proaspăt citit din GET /api/auth/me — nu de backend.
+            response.sendRedirect(frontendBaseUrl + "/");
         } catch (IllegalArgumentException ex) {
             log.warn("Autentificare OIDC invalidă: {}", ex.getMessage());
             sendJsonError(response, HttpServletResponse.SC_BAD_REQUEST, ex.getMessage());
@@ -95,14 +82,6 @@ public class CustomAuthenticationSuccessHandler implements AuthenticationSuccess
         } catch (IllegalStateException ex) {
             log.error("Configurare locală invalidă pentru autentificare: {}", ex.getMessage(), ex);
             sendJsonError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, ex.getMessage());
-        }
-    }
-
-    private NumeStareCont parseStareCont(String stare) {
-        try {
-            return NumeStareCont.valueOf(stare);
-        } catch (IllegalArgumentException | NullPointerException ex) {
-            return null;
         }
     }
 

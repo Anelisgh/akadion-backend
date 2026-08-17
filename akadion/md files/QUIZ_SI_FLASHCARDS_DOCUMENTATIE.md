@@ -1,6 +1,8 @@
-# Documentație Tehnică: Integrare Quiz & Flashcards Smart Aky
+# Documentație Tehnică: Quiz & Flashcards Smart Aky
 
-Acest document descrie arhitectura, modificările efectuate, regulile de securitate și fluxul end-to-end pentru modulele de **Quiz** și **Flashcards** pe stiva AKADION (Spring Boot, React Frontend și Python RAG Service).
+Acest document descrie arhitectura, fișierele implicate (pe toate cele trei straturi: backend Spring, microserviciul Python RAG, frontend React), regulile de securitate și fluxul end-to-end pentru modulele de **Quiz** și **Flashcards** din AKADION.
+
+> Pentru narațiunea pas-cu-pas a fluxului (declanșator → ce se întâmplă → de ce), vezi [`fluxuri/07-quiz-si-flashcards.md`](fluxuri/07-quiz-si-flashcards.md). Acest document e referința tehnică: unde e fiecare bucată de cod și cum arată exact payload-urile.
 
 ---
 
@@ -78,30 +80,27 @@ Acest document descrie arhitectura, modificările efectuate, regulile de securit
 
 ---
 
-## 3. Fișiere Modificate și Relaționarea lor
+## 3. Fișiere Implicate, pe Straturi
 
-> Căile de mai jos actualizate 2026-08-13 după restructurarea package-by-feature — pachetul unic `com.example.akadion.{dto,controller,service}` nu mai există, fiecare clasă e acum sub pachetul feature-ului ei (`akychat/` pentru chat+flashcards, `quiz/` pentru quiz, `curs/` pentru progres/înscriere). Fostul `StudentController` a fost și el despărțit pe 3 clase — vezi `api-controllers.md` §7.
+> Fiecare clasă Java e organizată pe pachetul feature-ului ei (`akychat/` pentru chat+flashcards, `quiz/` pentru quiz, `curs/` pentru progres/înscriere) — vezi `configurari.md` §1 pentru arhitectura pe feature. Fostul `StudentController` monolitic e împărțit pe 3 clase de controller, câte una per feature — vezi `api-controllers.md` §7.
 
 ### A. Backend Monolit (Java / Spring Boot)
 
 1. **`FlashcardGenerateRequestDto.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/dto/`)
-   - **Ce face**: DTO (Record Java) care încapsulează parametrii: `documentId` (opțional) și `nrFlashcards` (1 - 20).
+   - **Ce face**: DTO (Record Java) care încapsulează parametrii unei cereri de generare: `documentId` (opțional) și `nrFlashcards` (1-20).
 
-2. **`StudentAkyController.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/controller/`) — fostă metodă din `StudentController`, acum clasă separată
-   - **Ce face**: Expune endpoint-ul securizat `@PostMapping("/cursuri/{cursId}/flashcards/generate")` protejat de `@PreAuthorize("hasRole('STUDENT')")`.
+2. **`StudentAkyController.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/controller/`)
+   - **Ce face**: Expune endpoint-ul securizat `@PostMapping("/cursuri/{cursId}/flashcards/generate")`, protejat de `@PreAuthorize("hasRole('STUDENT')")`.
 
-3. **`StudentAkyService.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/service/`) — extras din fostul `StudentCursService` monolit (2026-08-12/13)
-   - **Ce face**:
-     - `genereazaFlashcards()`: Validează că:
-       1. Numărul de fișe este între 1 și 20 (implicit 5).
-       2. Dacă se specifică un `documentId`, verifică că documentul este activ, aparține cursului și că `nrSaptamana` <= `maxSaptamana`.
-       3. Aplică rate-limiting-ul comun cu chat+quiz (`studentCursService.verificaRateLimitAky`).
-   - Deleagă la `StudentCursService.determinaSaptamanaParcursaMax()` (rămas în `curs/service/`) pentru calculul săptămânii maxime parcurse.
+3. **`StudentAkyService.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/service/`)
+   - **Ce face**: `genereazaFlashcards()` validează, în ordine:
+     1. Numărul de fișe cerut e între 1 și 20 (implicit 5).
+     2. Dacă se specifică un `documentId`, documentul e activ, aparține cursului, și `nrSaptamana` ≤ `maxSaptamana` (nu poți genera fișe din materie neparcursă).
+     3. Rate-limiting-ul comun cu chat+quiz (`studentCursService.verificaRateLimitAky`) nu e depășit.
+   - Deleagă la `StudentCursService.determinaSaptamanaParcursaMax()` (`curs/service/`) pentru calculul săptămânii maxime parcurse — aceeași funcție folosită și de chat și de quiz, ca să nu existe trei implementări diferite ale aceluiași calcul (vezi `services.md` §9.1).
 
 4. **`RagChatService.java`** (`backend/akadion/src/main/java/com/example/akadion/akychat/service/`)
-   - **Ce face**:
-     - `genereazaFlashcards()`: Execută cererea HTTP POST către microserviciul Python RAG.
-     - `genereazaQuiz()`: Actualizate null-check-urile pentru payload (`maxSaptamana`, `documentId`, `nrIntrebari`).
+   - **Ce face**: `genereazaFlashcards()` și `genereazaQuiz()` execută cererea HTTP POST către microserviciul Python RAG, construind payload-ul din `cursId`, `maxSaptamana`, `documentId` (opțional) și numărul cerut de itemi.
 
 ---
 
@@ -124,9 +123,9 @@ Acest document descrie arhitectura, modificările efectuate, regulile de securit
    - Funcția `genereazaFlashcards(cursId, documentId, nrFlashcards)` pentru apelarea API-ului Spring.
 
 2. **`AkyChatWidget.jsx`** (`frontend/src/components/chat/`)
-   - Stări noi React: `rightPanelMode` (`null` | `'quiz'` | `'flashcards'`), `flashcardQuestions`, `currentFlashcardIndex`, `isFlashcardFlipped`, `isFlashcardsLoading`, etc.
-   - Componentă UI 3D Flip Card: Folosește `perspective: 1000px`, `transformStyle: preserve-3d` și `transform: rotateY(180deg)` pentru rotire fluidă între concept (față) și răspuns (verso).
-   - Buton dual în header: Butonul de Quiz cu textul original (`"Aky e gata de examen. Tu? QUIZ"`) și butonul de `"Flashcards"`.
+   - Ține starea panoului lateral prin `rightPanelMode` (`null` | `'quiz'` | `'flashcards'`), plus `flashcardQuestions`, `currentFlashcardIndex`, `isFlashcardFlipped`, `isFlashcardsLoading` pentru navigarea prin setul de fișe generat.
+   - Componenta de fișă foloseşte o animație CSS de tip "flip 3D" (`perspective: 1000px`, `transformStyle: preserve-3d`, `transform: rotateY(180deg)`) pentru rotirea fluidă între concept (față) și răspuns (verso).
+   - Header-ul widget-ului are două butoane: unul pentru Quiz (`"Aky e gata de examen. Tu? QUIZ"`) și unul pentru `"Flashcards"`.
 
 ---
 

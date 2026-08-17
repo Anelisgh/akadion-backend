@@ -142,16 +142,17 @@ Reprezintă starea în care se află contul unui utilizator în workflow-ul de a
   - `document`: `@ManyToOne` (Către `Document`, Nullable) - documentul pe care s-a bazat generarea, dacă a fost specificat unul.
 - **Indecși:** `(id_student, status, created_at DESC)`, `(id_curs, status, created_at DESC)`.
 
-### 3.10. AuditLog (`audit_logs`)
-- **Scop:** Reține istoricul complet al acțiunilor sensibile și administrative de pe platformă.
+### 3.10. AuditLog (`audit_log`)
+- **Scop:** Reține istoricul complet al acțiunilor sensibile și administrative de pe platformă — cine a modificat ce, când, și valorile dinainte/după. Explicație completă a funcționării: `fluxuri/02-administrare-utilizatori-si-audit.md` §Audit Log și `explicatie_audit_jurnal.md`.
 - **Câmpuri:**
   - `id`: `Long` (PK)
-  - `actionType`: `String` (NOT NULL, max 100) - Tipul acțiunii (ex: `USER_ACTIVATED`, `COURSE_DEACTIVATED`).
-  - `entityId`: `String` (Nullable, max 100) - ID-ul entității afectate.
-  - `entityType`: `String` (NOT NULL, max 100) - Tipul entității (ex: `User`, `Curs`).
-  - `details`: `String` (Nullable, columnDefinition `TEXT`) - Detalii adiționale, frecvent în format JSON.
-  - `ipAddress`: `String` (Nullable, max 45) - IP-ul utilizatorului care a executat acțiunea.
-  - *Extinde `BaseAuditableEntity` (include `createdBy` / `createdAt`).*
+  - `numeTabel`: `NumeTabelAudit` (Enum, NOT NULL, max 50) - Entitatea de business afectată: `APP_USER`, `CURS`, `DOCUMENT`, `SAPTAMANA`, `USER_CURS`.
+  - `idInregistrare`: `Long` (NOT NULL) - ID-ul rândului afectat din tabela respectivă.
+  - `operatie`: `OperatieAudit` (Enum, NOT NULL, max 30) - Ce s-a întâmplat: `CREARE`, `EDITARE`, `STERGERE`, `UPLOAD`, `INLOCUIRE`, `ACTIVARE`, `DEZACTIVARE`, `APROBARE`, `RESPINGERE`, `REACTIVARE`, `CREARE_CONT`, `EDITARE_PROFIL`, `SCHIMBARE_EMAIL`, `COMPLETARE_PROFIL`, `INSCRIERE`.
+  - `utilizator`: `String` (Nullable, max 36) - ID-ul Keycloak (`sub`) al autorului, citit din `SecurityContext` (niciodată din request). `"system"` dacă acțiunea nu are un utilizator logat în spate (ex: seeding la pornire).
+  - `valoriVechi` / `valoriNoi`: `Map<String, Object>` (JSONB, nullable) - starea câmpurilor relevante înainte și după modificare (ex: `{"stare": "PENDING"}` → `{"stare": "ACTIV"}`).
+  - `createdAt`: `OffsetDateTime` (NOT NULL, not updatable) - setat automat la creare (nu extinde `BaseAuditableEntity` — entitatea are propriul câmp `createdAt`, fără `updatedBy`/`updatedAt`, pentru că un rând de audit nu se editează niciodată după ce e scris).
+- **Fără `@Data`/`toString()` generat automat** (decizie de securitate): `valoriVechi`/`valoriNoi` conțin frecvent date personale (nume, email) — un `println` accidental pe entitate le-ar putea scurge în log-urile serverului.
 
 ---
 
@@ -168,3 +169,11 @@ Reprezintă starea în care se află contul unui utilizator în workflow-ul de a
 ### 4.3. IncercareQuizStatus
 - **Denumiri posibile:** `'GENERATA'`, `'FINALIZATA'`.
 - **Scop:** Indică stadiul unui quiz inițiat de un student. Tranziție unică, ireversibilă: `GENERATA → FINALIZATA` (redenumit din fostul `StatusIncercareQuiz` cu valorile `IN_DESFASURARE`/`FINALIZAT`).
+
+### 4.4. NumeTabelAudit
+- **Denumiri posibile:** `APP_USER`, `CURS`, `DOCUMENT`, `SAPTAMANA`, `USER_CURS`.
+- **Scop:** Identifică entitatea de business la care se referă un rând din `AuditLog` (§3.10).
+
+### 4.5. OperatieAudit
+- **Denumiri posibile:** `CREARE`, `EDITARE`, `STERGERE`, `UPLOAD`, `INLOCUIRE`, `ACTIVARE`, `DEZACTIVARE`, `APROBARE`, `RESPINGERE`, `REACTIVARE`, `CREARE_CONT`, `EDITARE_PROFIL`, `SCHIMBARE_EMAIL`, `COMPLETARE_PROFIL`, `INSCRIERE`.
+- **Scop:** Identifică tipul acțiunii înregistrate într-un rând din `AuditLog` (§3.10).

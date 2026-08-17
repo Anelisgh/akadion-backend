@@ -46,7 +46,7 @@ class CustomAuthenticationSuccessHandlerTest {
     }
 
     @Test
-    void firstLoginCreatesLocalIncompleteUserAndRedirectsToCompleteProfile() throws Exception {
+    void firstLoginCreatesLocalIncompleteUserAndRedirectsToFrontendRoot() throws Exception {
         when(userRepository.findByIdKeycloak("sub-new")).thenReturn(Optional.empty());
 
         MockHttpServletRequest request = new MockHttpServletRequest();
@@ -59,7 +59,7 @@ class CustomAuthenticationSuccessHandlerTest {
         );
 
         verify(userProfileService).inregistreazaUserNou("sub-new", "new.user@akadion.test");
-        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/complete-profile");
+        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/");
     }
 
     @Test
@@ -73,33 +73,33 @@ class CustomAuthenticationSuccessHandlerTest {
         assertThat(existingUser.getMail()).isEqualTo("existing@akadion.test");
         assertThat(existingUser.getNume()).isEqualTo("Existing");
         assertThat(existingUser.getStareCont().getDenumire()).isEqualTo("INCOMPLET");
-        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/complete-profile");
+        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/");
     }
 
     @Test
-    void activeAdminRedirectsToHome() throws Exception {
+    void activeAdminRedirectsToFrontendRoot() throws Exception {
         when(userRepository.findByIdKeycloak("sub-admin")).thenReturn(Optional.of(user("sub-admin", "admin@akadion.test", null, null, "ADMIN", "ACTIV")));
 
         MockHttpServletResponse response = performSuccess("sub-admin", "admin@akadion.test");
 
-        assertThat(response.getRedirectedUrl()).isEqualTo("http://localhost:5173/");
+        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/");
     }
 
     @ParameterizedTest
     @CsvSource({
-            "STUDENT,ACTIV,/",
-            "PROFESOR,ACTIV,/",
-            "STUDENT,INCOMPLET,/complete-profile",
-            "PROFESOR,PENDING,/asteptare-aprobare",
-            "STUDENT,RESPINS,/cerere-respinsa",
-            "PROFESOR,INACTIV,/cont-dezactivat"
+            "STUDENT,ACTIV",
+            "PROFESOR,ACTIV",
+            "STUDENT,INCOMPLET",
+            "PROFESOR,PENDING",
+            "STUDENT,RESPINS",
+            "PROFESOR,INACTIV"
     })
-    void redirectsUsersByExistingRoleAndStatus(String roleName, String stareName, String expectedPath) throws Exception {
+    void redirectsExistingUsersToFrontendRootRegardlessOfRoleAndStatus(String roleName, String stareName) throws Exception {
         when(userRepository.findByIdKeycloak("sub-user")).thenReturn(Optional.of(user("sub-user", "user@akadion.test", null, null, roleName, stareName)));
 
         MockHttpServletResponse response = performSuccess("sub-user", "user@akadion.test");
 
-        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + expectedPath);
+        assertThat(response.getRedirectedUrl()).isEqualTo(FRONTEND_BASE_URL + "/");
     }
 
     @Test

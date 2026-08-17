@@ -61,7 +61,9 @@ public class SecurityConfig {
             // 2. Protecția CSRF (Cross-Site Request Forgery).
             // Aplicația este SPA și trimite tokenul brut din cookie-ul XSRF-TOKEN în header-ul X-XSRF-TOKEN.
             // În Spring Security 7, csrf.spa() configurează exact acest flux: cookie repository + request handler compatibil cu SPA.
-            .csrf(csrf -> csrf.spa())
+            // /api/rag/** e exclus: e apelat de embedder_service (Python), care nu are cookie de sesiune/XSRF,
+            // ci se autentifică prin Basic Auth verificată manual în RagCallbackController.
+            .csrf(csrf -> csrf.spa().ignoringRequestMatchers("/api/rag/**"))
             
             // 3. Adăugăm filtrul nostru de CSRF imediat după filtrele de autentificare de bază.
             // Acest filtru forțează scrierea cookie-ului CSRF la primul request GET.
@@ -76,6 +78,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Permitem oricui (fără login) accesul la căile de eroare și monitorizare.
                 .requestMatchers("/error", "/actuator/health", "/oauth2/**", "/login/**").permitAll()
+                // Callback-ul embedder-ului nu are sesiune Keycloak - se autentifică singur prin
+                // Basic Auth în RagCallbackController, nu prin filtrul de securitate.
+                .requestMatchers("/api/rag/**").permitAll()
                 // Orice alt request din aplicație cere obligatoriu ca utilizatorul să fie autentificat (logat).
                 .anyRequest().authenticated()
             )
